@@ -1,0 +1,1174 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="対局アシスタント">
+<meta name="theme-color" content="#0F1319">
+<title>オセロ対局アシスタント</title>
+<style>
+  :root{
+    --ink:#0F1319; --panel:#161B23; --line:#232B36; --board:#33503E;
+    --grid:rgba(232,225,208,0.16); --inner:rgba(232,225,208,0.40); --star:rgba(232,225,208,0.62);
+    --ivory:#EFE8D8; --jet:#0A0D12;
+    --brass:#C9A227; --muted:#7E8899; --alert:#C2543B; --body:#B9C0CC;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic","Noto Sans JP",sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;background:var(--ink)}
+  body{color:var(--ivory);font-family:var(--sans);
+       padding:calc(18px + env(safe-area-inset-top)) 14px calc(34px + env(safe-area-inset-bottom));
+       -webkit-text-size-adjust:100%}
+  .wrap{max-width:440px;margin:0 auto}
+
+  .head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
+  .head .id{font-family:var(--mono);font-size:11px;letter-spacing:.22em;color:var(--muted)}
+  .head .n{font-family:var(--mono);font-size:11px;color:var(--muted)}
+
+  .seg{display:flex;border:1px solid var(--line);margin-bottom:6px}
+  .seg.last{margin-bottom:8px}
+  .seglabel{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--muted);margin:0 0 5px}
+  .seglabel.sp{margin-top:13px}
+  .seg button{flex:1;background:transparent;border:0;border-right:1px solid var(--line);
+              color:var(--muted);font-family:var(--mono);font-size:11px;letter-spacing:.08em;
+              padding:10px 4px;cursor:pointer}
+  .seg button:last-child{border-right:0}
+  .seg button.on{background:#1D242E;color:var(--brass)}
+  .seg button:focus-visible{outline:2px solid var(--brass);outline-offset:-2px}
+
+  .audio{display:flex;gap:8px;margin-bottom:14px}
+  .audio button{flex:1;background:transparent;border:1px solid var(--line);color:var(--muted);
+                font-family:var(--mono);font-size:11px;letter-spacing:.08em;padding:10px 4px;cursor:pointer}
+  .audio button.on{border-color:var(--brass);color:var(--brass)}
+  .audio button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+
+  .card{background:var(--panel);border:1px solid var(--line);padding:16px 16px 18px;margin-bottom:16px}
+  .eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.22em;color:var(--muted)}
+  .move{font-family:var(--mono);font-size:52px;font-weight:500;letter-spacing:.06em;
+        color:var(--brass);line-height:1.05;margin-top:4px}
+  .move.plain{font-size:26px;color:var(--ivory);margin-top:8px;letter-spacing:.04em}
+  .move.big{font-size:40px;color:var(--ivory);margin-top:6px;letter-spacing:.04em}
+  .badge{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--brass);
+         border:1px solid var(--brass);padding:3px 7px;margin-left:12px;vertical-align:middle}
+  .notice{border-left:2px solid var(--alert);padding:8px 0 8px 11px;margin:0 0 14px;
+          font-size:13px;line-height:1.7;color:var(--ivory);background:rgba(194,84,59,0.07)}
+  .notice b{color:var(--alert);font-weight:600}
+  .turnstone{display:inline-block;width:24px;height:24px;border-radius:50%;
+             vertical-align:-3px;margin-right:13px}
+  .turnstone.b{background:var(--jet);border:1px solid #39414F}
+  .turnstone.w{background:var(--ivory);border:1px solid #C8C0AE}
+  .why{margin:10px 0 0;font-size:13px;color:var(--body);line-height:1.75}
+  .why.dim{color:var(--muted)}
+
+  .boardbox{background:var(--panel);border:1px solid var(--line);padding:10px}
+  .layout{display:grid;grid-template-columns:22px 1fr;gap:4px}
+  .files{display:grid;grid-template-columns:repeat(8,1fr)}
+  .files span{text-align:center;font-family:var(--mono);font-size:11px;color:var(--muted);padding-bottom:4px}
+  .ranks{display:grid;grid-template-rows:repeat(8,1fr)}
+  .ranks span{display:flex;align-items:center;justify-content:center;
+              font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .grid{display:grid;grid-template-columns:repeat(8,1fr);background:var(--board);
+        border:1px solid rgba(0,0,0,.5);aspect-ratio:1/1;position:relative}
+  /* 市販のオセロ盤と同じ内枠：中央16マスを囲む線と、その四隅の打点 */
+  .grid::before{content:"";position:absolute;left:25%;top:25%;width:50%;height:50%;
+                border:1px solid var(--inner);pointer-events:none;z-index:0}
+  .grid::after{content:"";position:absolute;left:0;top:0;right:0;bottom:0;
+               pointer-events:none;z-index:0;
+               background:
+                 radial-gradient(circle 3px at 25% 25%, var(--star) 99%, transparent 100%),
+                 radial-gradient(circle 3px at 75% 25%, var(--star) 99%, transparent 100%),
+                 radial-gradient(circle 3px at 25% 75%, var(--star) 99%, transparent 100%),
+                 radial-gradient(circle 3px at 75% 75%, var(--star) 99%, transparent 100%)}
+  .sq{position:relative;z-index:1;border:0;padding:0;background:transparent;
+      box-shadow:inset -1px -1px 0 0 var(--grid);
+      display:flex;align-items:center;justify-content:center}
+  .sq.can{cursor:pointer}
+  .sq:focus-visible{outline:2px solid var(--brass);outline-offset:-2px}
+  .stone{width:78%;height:78%;border-radius:50%}
+  .stone.b{background:var(--jet);border:1px solid #2A313C}
+  .stone.w{background:var(--ivory);border:1px solid #C8C0AE}
+  .stone.last{box-shadow:0 0 0 2px var(--brass)}
+  .dot{width:6px;height:6px;border-radius:50%}
+  .dot.b{background:rgba(10,13,18,.55)} .dot.w{background:rgba(239,232,216,.55)}
+  .ring{width:72%;height:72%;border-radius:50%;border:2px solid var(--brass);
+        animation:pulse 2.2s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.95}50%{opacity:.35}}
+  @media (prefers-reduced-motion:reduce){.ring{animation:none}}
+
+  .tally{display:flex;align-items:center;gap:18px;margin:16px 0 14px;font-family:var(--mono);font-size:13px}
+  .t{display:inline-flex;align-items:center;gap:7px;opacity:.5}
+  .t.on{opacity:1}
+  .t i{width:15px;height:15px;border-radius:50%;display:inline-block}
+  .t .lbl{color:var(--muted);font-size:11px}
+  .empt{margin-left:auto;color:var(--muted);font-size:11px}
+
+  .cands{border:1px solid var(--line);margin-bottom:14px}
+  .cands h2{margin:0;padding:9px 12px;border-bottom:1px solid var(--line);
+            font-family:var(--mono);font-size:10px;font-weight:400;letter-spacing:.2em;color:var(--muted)}
+  .row{display:flex;align-items:center;gap:12px;padding:10px 12px;border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:0}
+  .row .sqn{font-family:var(--mono);font-size:17px;width:34px}
+  .row .meta{font-size:12px;color:var(--muted)}
+  .row .sc{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .row.top .sqn,.row.top .sc{color:var(--brass)}
+
+  .kifu{border-top:1px solid var(--line);padding-top:12px}
+  .kifu h2{margin:0 0 7px;font-family:var(--mono);font-size:10px;font-weight:400;
+           letter-spacing:.2em;color:var(--muted)}
+  .strip{overflow-x:auto;white-space:nowrap;font-family:var(--mono);font-size:13px;
+         color:var(--muted);padding-bottom:4px;scrollbar-width:none}
+  .strip::-webkit-scrollbar{height:0}
+  .strip span{margin-right:12px}
+  .strip span.cur{color:var(--brass)}
+
+  .ctrls{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+  #gamectrls{margin:0 0 15px}
+  button.b{background:transparent;border:1px solid var(--line);color:var(--body);
+           font-family:var(--mono);font-size:11px;letter-spacing:.08em;padding:9px 13px;cursor:pointer}
+  button.b:disabled{color:#4A5260;cursor:default}
+  button.b.go{border-color:var(--brass);color:var(--brass);font-size:12px;letter-spacing:.1em;padding:9px 16px}
+  button.b:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <div class="id">OTHELLO / 対局アシスタント</div>
+    <div class="n" id="moveno"></div>
+  </div>
+
+  <div class="seglabel">モード</div>
+  <div class="seg" id="segmode">
+    <button data-u="0" class="on">アシストモード</button>
+    <button data-u="1">ふたりで対局</button>
+    <button data-u="2">EGO-GPTと対戦</button>
+  </div>
+
+  <div id="assistopts">
+    <div class="seglabel sp">アシスト</div>
+    <div class="seg" id="seg1">
+      <button data-m="0" class="on">両方にアシスト</button>
+      <button data-m="1">黒だけ</button>
+      <button data-m="2">白だけ</button>
+    </div>
+    <div class="seg last" id="seg2">
+      <button data-m="3">アシストなし</button>
+      <button data-m="4">アシスト・印なし</button>
+    </div>
+  </div>
+
+  <div id="cpuopts" style="display:none">
+    <div class="seglabel sp">EGO-GPT の強さ</div>
+    <div class="seg" id="seglv">
+      <button data-l="1" class="on">初級</button>
+      <button data-l="2">中級</button>
+      <button data-l="3">上級</button>
+    </div>
+    <div class="seglabel sp">あなたの石</div>
+    <div class="seg last" id="segcol">
+      <button data-c="1" class="on">黒（先手）</button>
+      <button data-c="2">白（後手）</button>
+    </div>
+  </div>
+
+  <div class="audio">
+    <button id="sfxbtn" class="on">効果音 ON</button>
+    <button id="bgmbtn">BGM OFF</button>
+  </div>
+
+  <div class="ctrls" id="gamectrls">
+    <button class="b go" id="start">対局スタート</button>
+    <button class="b" id="restart">リスタート</button>
+  </div>
+
+  <div class="card" id="card"></div>
+
+  <div class="boardbox">
+    <div class="layout">
+      <div></div>
+      <div class="files"><span>A</span><span>B</span><span>C</span><span>D</span><span>E</span><span>F</span><span>G</span><span>H</span></div>
+      <div class="ranks"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div>
+      <div class="grid" id="grid"></div>
+    </div>
+  </div>
+
+  <div class="tally">
+    <span class="t" id="tb"><i style="background:#0A0D12;border:1px solid #39414F"></i><span id="cb">2</span><span class="lbl">黒</span></span>
+    <span class="t" id="tw"><i style="background:#EFE8D8"></i><span id="cw">2</span><span class="lbl">白</span></span>
+    <span class="empt" id="empt"></span>
+  </div>
+
+  <div id="cands"></div>
+
+  <div class="kifu">
+    <h2>棋譜</h2>
+    <div class="strip" id="strip"></div>
+  </div>
+
+  <div class="ctrls">
+    <button class="b" id="undo">1手戻す</button>
+  </div>
+</div>
+
+<script>
+/* ═══════════ エンジン ═══════════ */
+var DIRS=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+var W=[120,-20, 20,  5,  5, 20,-20,120,
+       -20,-40, -5, -5, -5, -5,-40,-20,
+        20, -5, 15,  3,  3, 15, -5, 20,
+         5, -5,  3,  3,  3,  3, -5,  5,
+         5, -5,  3,  3,  3,  3, -5,  5,
+        20, -5, 15,  3,  3, 15, -5, 20,
+       -20,-40, -5, -5, -5, -5,-40,-20,
+       120,-20, 20,  5,  5, 20,-20,120];
+var CORNERS=[0,7,56,63], XSQ=[9,14,49,54], CSQ=[1,6,8,15,48,55,57,62];
+
+function sqn(i){return "ABCDEFGH".charAt(i%8)+(Math.floor(i/8)+1);}
+
+function flipsFor(b,i,p){
+  if(b[i]!==0) return [];
+  var r0=Math.floor(i/8),c0=i%8,o=3-p,out=[],k,r,c,line;
+  for(k=0;k<8;k++){
+    r=r0+DIRS[k][0]; c=c0+DIRS[k][1]; line=[];
+    while(r>=0&&r<8&&c>=0&&c<8&&b[r*8+c]===o){line.push(r*8+c);r+=DIRS[k][0];c+=DIRS[k][1];}
+    if(line.length&&r>=0&&r<8&&c>=0&&c<8&&b[r*8+c]===p) out=out.concat(line);
+  }
+  return out;
+}
+function legal(b,p){var m=[],i;for(i=0;i<64;i++){if(b[i]===0&&flipsFor(b,i,p).length)m.push(i);}return m;}
+function applyMove(b,i,p){var n=b.slice(),f=flipsFor(b,i,p),k;for(k=0;k<f.length;k++)n[f[k]]=p;n[i]=p;return n;}
+function counts(b){var a=0,c=0,k;for(k=0;k<64;k++){if(b[k]===1)a++;else if(b[k]===2)c++;}return[a,c];}
+function empties(b){var e=0,k;for(k=0;k<64;k++)if(b[k]===0)e++;return e;}
+function evaluate(b,p){
+  var o=3-p,pos=0,k;
+  for(k=0;k<64;k++){if(b[k]===p)pos+=W[k];else if(b[k]===o)pos-=W[k];}
+  return pos+14*(legal(b,p).length-legal(b,o).length);
+}
+
+/* ═══════════ 探索コア ═══════════
+   時間で打ち切ると端末の速さで強さが変わってしまうので、打ち切りはやめて
+   探索そのものを速くした。読む深さは端末によらず一定。
+   ・盤は Int8Array。1手ごとに盤を複製せず、返した石を覚えて戻す（make / unmake）
+   ・8方向の並びを表にしておき、探索中は配列を一切作らない
+   ・置換表（Zobristハッシュ）で、手順違いで現れた同じ局面を読み直さない
+   ・PVS：最善手だけ広く読み、残りは「これより良くない」ことの確認に絞る    */
+
+var RAY=[];                          /* RAY[マス*8+方向] = その方向に並ぶマス */
+(function(){
+  var i,d,r,c,a;
+  for(i=0;i<64;i++) for(d=0;d<8;d++){
+    a=[]; r=(i>>3)+DIRS[d][0]; c=(i&7)+DIRS[d][1];
+    while(r>=0&&r<8&&c>=0&&c<8){ a.push(r*8+c); r+=DIRS[d][0]; c+=DIRS[d][1]; }
+    RAY[i*8+d]=new Int8Array(a);
+  }
+})();
+
+var SB=new Int8Array(64);            /* 探索中の盤 */
+var FLIP=new Int8Array(64*24);       /* 返した石（深さごとに記録して戻す） */
+var FLIPN=new Int8Array(64);
+var MOVES=new Int8Array(64*34);      /* 深さごとの着手リスト */
+var ORD=new Int32Array(64*34);       /* 並べ替え用の点数 */
+
+/* Zobristハッシュ：局面を32bit×2の鍵にする */
+var ZA=new Int32Array(128), ZB=new Int32Array(128), ZTA=0,ZTB=0, ZEA=0,ZEB=0, HA=0,HB=0;
+(function(){
+  var s=123456789,k;
+  function nx(){ s^=s<<13; s^=s>>>17; s^=s<<5; return s|0; }
+  for(k=0;k<128;k++){ ZA[k]=nx(); ZB[k]=nx(); }
+  ZTA=nx(); ZTB=nx();               /* 手番の分 */
+  ZEA=nx(); ZEB=nx();               /* 完全読みと通常読みは別物として区別する */
+})();
+
+var TTBITS=18, TTSIZE=1<<TTBITS, TTMASK=TTSIZE-1;
+var ttA=new Int32Array(TTSIZE), ttB=new Int32Array(TTSIZE),
+    ttV=new Int32Array(TTSIZE), ttM=new Int32Array(TTSIZE);   /* 深さ | 種別<<6 | (手+1)<<8 */
+
+function loadSB(b){
+  var k; HA=0; HB=0;
+  for(k=0;k<64;k++){ SB[k]=b[k]; if(b[k]){ HA^=ZA[k*2+b[k]-1]; HB^=ZB[k*2+b[k]-1]; } }
+}
+function doMove(i,p,ply){
+  var base=ply*24,n=0,o=3-p,d,ray,len,k,j,cnt,q,s;
+  for(d=0;d<8;d++){
+    ray=RAY[i*8+d]; len=ray.length; cnt=0;
+    for(k=0;k<len;k++){
+      j=ray[k];
+      if(SB[j]===o){ cnt++; continue; }
+      if(SB[j]===p&&cnt){
+        for(q=0;q<cnt;q++){ s=ray[q]; SB[s]=p; FLIP[base+n++]=s;
+                            HA^=ZA[s*2]^ZA[s*2+1]; HB^=ZB[s*2]^ZB[s*2+1]; }
+      }
+      break;
+    }
+  }
+  SB[i]=p; HA^=ZA[i*2+p-1]; HB^=ZB[i*2+p-1];
+  FLIPN[ply]=n;
+}
+function undoMove(i,p,ply){
+  var base=ply*24,n=FLIPN[ply],o=3-p,k,s;
+  for(k=0;k<n;k++){ s=FLIP[base+k]; SB[s]=o; HA^=ZA[s*2]^ZA[s*2+1]; HB^=ZB[s*2]^ZB[s*2+1]; }
+  SB[i]=0; HA^=ZA[i*2+p-1]; HB^=ZB[i*2+p-1];
+}
+function genMoves(p,ply){
+  var base=ply*34,n=0,o=3-p,i,d,ray,len,k,j,cnt,ok;
+  for(i=0;i<64;i++){
+    if(SB[i]!==0) continue;
+    ok=0;
+    for(d=0;d<8;d++){
+      ray=RAY[i*8+d]; len=ray.length; cnt=0;
+      for(k=0;k<len;k++){
+        j=ray[k];
+        if(SB[j]===o){ cnt++; continue; }
+        if(SB[j]===p&&cnt) ok=1;
+        break;
+      }
+      if(ok) break;
+    }
+    if(ok) MOVES[base+n++]=i;
+  }
+  return n;
+}
+function countMoves(p){
+  var n=0,o=3-p,i,d,ray,len,k,j,cnt,ok;
+  for(i=0;i<64;i++){
+    if(SB[i]!==0) continue;
+    ok=0;
+    for(d=0;d<8;d++){
+      ray=RAY[i*8+d]; len=ray.length; cnt=0;
+      for(k=0;k<len;k++){
+        j=ray[k];
+        if(SB[j]===o){ cnt++; continue; }
+        if(SB[j]===p&&cnt) ok=1;
+        break;
+      }
+      if(ok) break;
+    }
+    if(ok) n++;
+  }
+  return n;
+}
+function evalFast(p){
+  var o=3-p,pos=0,k,v;
+  for(k=0;k<64;k++){ v=SB[k]; if(v===p) pos+=W[k]; else if(v===o) pos-=W[k]; }
+  return pos+14*(countMoves(p)-countMoves(o));
+}
+function finalFast(p){
+  var a=0,b=0,k,v;
+  for(k=0;k<64;k++){ v=SB[k]; if(v===1)a++; else if(v===2)b++; }
+  return (p===1?a-b:b-a)*1000;
+}
+
+function srch(p,d,alpha,beta,exact,ply){
+  var o=3-p, base=ply*34, n=genMoves(p,ply);
+  if(!n){                                        /* 打てない：相手も打てなければ終局 */
+    if(!countMoves(o)) return finalFast(p);
+    return -srch(o,d,-beta,-alpha,exact,ply+1);
+  }
+  if(!exact && d===0) return evalFast(p);
+
+  var ha=HA^(p===2?ZTA:0)^(exact?ZEA:0),
+      hb=HB^(p===2?ZTB:0)^(exact?ZEB:0),
+      idx=(ha>>>0)&TTMASK, m=ttM[idx], ttm=-1, td, tf, tv;
+  if(m && ttA[idx]===ha && ttB[idx]===hb){       /* 置換表に同じ局面があった */
+    td=m&63; tf=(m>>6)&3; tv=ttV[idx]; ttm=((m>>8)&127)-1;
+    if(exact || td>=d){
+      if(tf===1) return tv;                      /* 確定値 */
+      if(tf===2 && tv>=beta) return tv;          /* 下界（β以上と分かっている） */
+      if(tf===3 && tv<=alpha) return tv;         /* 上界（α以下と分かっている） */
+    }
+  }
+
+  var k,j,bi,tmp,i,v,best=-1e9,bm=-1,a=alpha;
+  for(k=0;k<n;k++) ORD[base+k]=(MOVES[base+k]===ttm ? 100000 : W[MOVES[base+k]]);
+  for(k=0;k<n;k++){
+    bi=k;                                        /* 良さそうな手から順に選び出す */
+    for(j=k+1;j<n;j++) if(ORD[base+j]>ORD[base+bi]) bi=j;
+    if(bi!==k){
+      tmp=ORD[base+k];   ORD[base+k]=ORD[base+bi];     ORD[base+bi]=tmp;
+      tmp=MOVES[base+k]; MOVES[base+k]=MOVES[base+bi]; MOVES[base+bi]=tmp;
+    }
+    i=MOVES[base+k];
+    doMove(i,p,ply);
+    if(k===0) v=-srch(o,d-1,-beta,-a,exact,ply+1);
+    else{
+      v=-srch(o,d-1,-a-1,-a,exact,ply+1);        /* まず狭い窓で確認 */
+      if(v>a && v<beta) v=-srch(o,d-1,-beta,-a,exact,ply+1);   /* 超えたら読み直す */
+    }
+    undoMove(i,p,ply);
+    if(v>best){ best=v; bm=i; if(v>a) a=v; }
+    if(best>=beta) break;
+  }
+
+  ttA[idx]=ha; ttB[idx]=hb; ttV[idx]=best;
+  ttM[idx]=(exact?63:d) | (((best<=alpha)?3:(best>=beta)?2:1)<<6) | ((bm+1)<<8);
+  return best;
+}
+
+/* 全候補手に点数をつけて並べる（アシスト表示・中級の候補選び用。窓は絞らない） */
+function rankMoves(b,p,depth,exact){
+  var mv=legal(b,p),out=[],k,i,nb;
+  mv.sort(function(x,y){return W[y]-W[x];});
+  loadSB(b);
+  for(k=0;k<mv.length;k++){
+    i=mv[k];
+    doMove(i,p,0);
+    out.push({i:i, score:-srch(3-p,depth-1,-1e9,1e9,exact,1), exact:exact});
+    undoMove(i,p,0);
+  }
+  for(k=0;k<out.length;k++){
+    nb=applyMove(b,out[k].i,p);
+    out[k].flips=flipsFor(b,out[k].i,p).length;
+    out[k].oppMoves=legal(nb,3-p).length;
+  }
+  out.sort(function(x,y){return y.score-x.score;});
+  return out;
+}
+/* 最善手だけを返す（EGO-GPT用。根でも窓を絞れるぶん速い） */
+function rootBest(b,p,depth,exact){
+  var mv=legal(b,p),k,i,v,best=-1e9,bi=-1,a=-1e9;
+  if(!mv.length) return -1;
+  mv.sort(function(x,y){return W[y]-W[x];});
+  loadSB(b);
+  for(k=0;k<mv.length;k++){
+    i=mv[k];
+    doMove(i,p,0);
+    v=-srch(3-p,depth-1,-1e9,-a,exact,1);
+    undoMove(i,p,0);
+    if(v>best){ best=v; bi=i; a=v; }
+  }
+  return bi;
+}
+/* アシスト：中盤は ASSIST_DEPTH 手読み、終盤は最後まで読み切る */
+var ASSIST_DEPTH=7, ASSIST_EXACT=12;
+function analyze(b,p){
+  var mv=legal(b,p),e;
+  if(!mv.length) return [];
+  e=empties(b);
+  if(e<=ASSIST_EXACT) return rankMoves(b,p,e,true);
+  return rankMoves(b,p,ASSIST_DEPTH,false);
+}
+function freshBoard(){
+  var b=[],k; for(k=0;k<64;k++) b.push(0);
+  b[27]=2; b[28]=1;   /* D4=白  E4=黒 */
+  b[35]=1; b[36]=2;   /* D5=黒  E5=白 */
+  return b;
+}
+
+/* ═══════════ EGO-GPT（コンピュータ対戦相手）═══════════
+   初級：手加減する。人間に隅とモビリティを譲り、リードするほど悪手を選ぶ。
+         ただし負けているときは持ち直して、一方的な展開にはしない。
+   中級：3手読み。4回に1回は最善を外す。終盤8マスから読み切り。
+   上級：7手読み＋終盤13マスは完全読み。手加減なし。
+   読む深さは固定。端末が遅くても浅くならない（時間で打ち切らない）。 */
+var EGO_NAME="EGO-GPT", LV_NAME={1:"初級",2:"中級",3:"上級"};
+
+function egoEasy(b,p){
+  var mv=legal(b,p), c=counts(b), lead=(p===1?c[0]-c[1]:c[1]-c[0]), keep=[], k, nb, s;
+  for(k=0;k<mv.length;k++) if(CORNERS.indexOf(mv[k])<0) keep.push(mv[k]);
+  if(keep.length) mv=keep;                  /* 隅は取らずに人間に残す（他に手がある限り） */
+  var t=0.5+lead*0.02;                      /* 手加減の強さ：リードするほど強く手を抜く */
+  if(t>1) t=1; if(t<0.8) t=0.8;             /* 負けていても、ほとんど手加減したまま */
+  var bias=1-2*t;                           /* +なら良い手、−なら悪い手を選ぶ向き */
+  var bi=mv[0], bs=-1e9;
+  for(k=0;k<mv.length;k++){
+    nb=applyMove(b,mv[k],p);
+    s = bias*evaluate(nb,p)*0.6 + rnd(0,26);
+    if(CORNERS.indexOf(mv[k])>=0) s -= 110*t;              /* 隅は人間に残す */
+    if(XSQ.indexOf(mv[k])>=0)     s +=  55*t;              /* 自分から危険地帯へ飛び込む */
+    if(CSQ.indexOf(mv[k])>=0)     s +=  26*t;
+    s += flipsFor(b,mv[k],p).length*3*t;                   /* 目先の枚数に飛びつく初心者らしさ */
+    if(s>bs){ bs=s; bi=mv[k]; }
+  }
+  return bi;
+}
+
+var MID_DEPTH=3, MID_EXACT=8, HIGH_DEPTH=7, HIGH_EXACT=13;
+function egoMove(b,p){
+  var e=empties(b), r;
+  if(cpuLevel===1) return egoEasy(b,p);
+
+  if(cpuLevel===2){
+    if(e<=MID_EXACT) return rootBest(b,p,e,true);          /* 終盤は読み切る */
+    r=rankMoves(b,p,MID_DEPTH,false);
+    if(!r.length) return -1;
+    if(r.length>1 && Math.random()<0.25)                   /* 4回に1回は最善を外す */
+      return r[1+((Math.random()*Math.min(2,r.length-1))|0)].i;
+    return r[0].i;
+  }
+  if(e<=HIGH_EXACT) return rootBest(b,p,e,true);
+  return rootBest(b,p,HIGH_DEPTH,false);
+}
+
+/* ═══════════════════════════════════════════
+   音 ── 素材が鳴って部屋に響く、を再現する
+   ・打撃音：ノイズ＋共振モード（物理モデル）
+   ・BGM  ：撥弦の物理モデル（Karplus-Strong）
+   ・空間 ：畳み込みリバーブ（残響を合成）
+   ═══════════════════════════════════════════ */
+var AC=null, master=null, dry=null, verb=null, verbSend=null;
+var noiseBuf=null, pluckCache={}, pluckOrder=[];
+var sfxOn=true, bgmOn=false;
+var bgmTimer=null, bgmBar=0, bgmNext=0, bgmGain=null;
+
+function rnd(a,b){ return a + Math.random()*(b-a); }
+
+/* 残響のインパルス応答を合成する（部屋の響き） */
+function makeIR(sec, decay, damp){
+  var sr=AC.sampleRate, len=Math.floor(sr*sec);
+  var buf=AC.createBuffer(2,len,sr), ch, i;
+  for(ch=0;ch<2;ch++){
+    var d=buf.getChannelData(ch), lp=0;
+    for(i=0;i<len;i++){
+      var t=i/len;
+      var n=(Math.random()*2-1)*Math.pow(1-t,decay);
+      lp = lp + (n-lp)*damp;              /* 高域ほど早く減る（壁の吸音） */
+      d[i]=lp;
+    }
+    /* 初期反射をわずかに足して部屋の大きさを感じさせる */
+    var e=[0.011,0.019,0.029,0.041];
+    for(i=0;i<e.length;i++){
+      var pos=Math.floor(sr*e[i]*(ch?1.07:1));
+      if(pos<len) d[pos]+= (0.45-i*0.09)*(Math.random()<0.5?-1:1);
+    }
+    d[0]=0;
+  }
+  return buf;
+}
+
+function audioReady(){
+  if(AC) return true;
+  var Ctor = window.AudioContext || window.webkitAudioContext;
+  if(!Ctor) return false;
+  try{
+    AC=new Ctor();
+    master = AC.createDynamicsCompressor();   /* 石が大量に返っても割れないように */
+    master.threshold.setValueAtTime(-14,AC.currentTime);
+    master.ratio.setValueAtTime(5,AC.currentTime);
+    master.attack.setValueAtTime(0.004,AC.currentTime);
+    master.release.setValueAtTime(0.18,AC.currentTime);
+    master.connect(AC.destination);
+
+    dry=AC.createGain(); dry.gain.value=0.95; dry.connect(master);
+
+    verb=AC.createConvolver();
+    verb.buffer=makeIR(1.7, 2.6, 0.34);
+    var vg=AC.createGain(); vg.gain.value=0.85;
+    verb.connect(vg); vg.connect(master);
+    verbSend=AC.createGain(); verbSend.gain.value=1; verbSend.connect(verb);
+
+    /* 打撃音の材料になるノイズ */
+    var sr=AC.sampleRate, n=Math.floor(sr*0.5);
+    noiseBuf=AC.createBuffer(1,n,sr);
+    var nd=noiseBuf.getChannelData(0);
+    for(var i=0;i<n;i++) nd[i]=Math.random()*2-1;
+  }catch(e){ AC=null; return false; }
+  return true;
+}
+function wake(){ if(AC && AC.state==="suspended"){ try{AC.resume();}catch(e){} } }
+
+/* ── 撥弦（Karplus-Strong）── 弦をはじいた音を波形から作る ── */
+function pluckBuffer(freq, dur, damp, tone){
+  var key = Math.round(freq)+"|"+Math.round(dur*10)+"|"+Math.round(damp*10000);
+  if(pluckCache[key]) return pluckCache[key];
+  if(pluckOrder.length>=56){ delete pluckCache[pluckOrder.shift()]; }   /* 上限を超えたら古いものから捨てる */
+  var sr=AC.sampleRate;
+  var N=Math.max(2, Math.round(sr/freq));
+  var len=Math.ceil(sr*dur);
+  var buf=AC.createBuffer(1,len,sr);
+  var d=buf.getChannelData(0);
+  var line=new Float32Array(N), i, prev=0, mean=0;
+  for(i=0;i<N;i++){                       /* 励振＝はじいた瞬間のノイズ */
+    var w=Math.random()*2-1;
+    prev = prev + (w-prev)*tone;
+    line[i]=prev; mean+=prev;
+  }
+  mean/=N; for(i=0;i<N;i++) line[i]-=mean;
+  var idx=0, last=0;
+  for(i=0;i<len;i++){
+    var cur=line[idx];
+    d[i]=cur;
+    var f=(cur+last)*0.5;                 /* 高域から先に減る＝弦らしさ */
+    last=cur;
+    line[idx]=f*damp;
+    idx=(idx+1)%N;
+  }
+  var fade=Math.min(len, Math.floor(sr*0.3));
+  for(i=0;i<fade;i++) d[len-1-i]*= i/fade;
+  pluckCache[key]=buf; pluckOrder.push(key);
+  return buf;
+}
+
+function playBuf(buf,t,gain,send,rate){
+  var s=AC.createBufferSource(); s.buffer=buf;
+  if(rate) s.playbackRate.setValueAtTime(rate,t);
+  var g=AC.createGain(); g.gain.setValueAtTime(gain,t);
+  s.connect(g); g.connect(dry);
+  if(send>0){ var sg=AC.createGain(); sg.gain.setValueAtTime(gain*send,t); g.connect(sg); sg.connect(verbSend); }
+  s.start(t);
+  return s;
+}
+
+function pluck(freq,t,vel,dur,damp,tone,send,rate,dest){
+  rate = rate || 1;
+  var buf=pluckBuffer(freq,dur,damp,tone);
+  var s=AC.createBufferSource(); s.buffer=buf;
+  if(rate!==1) s.playbackRate.setValueAtTime(rate,t);
+  var f=AC.createBiquadFilter(); f.type="lowpass";
+  f.frequency.setValueAtTime((2400+vel*4200)*Math.min(rate,2),t); f.Q.setValueAtTime(0.6,t);
+  var g=AC.createGain();
+  g.gain.setValueAtTime(0.0001,t);
+  g.gain.exponentialRampToValueAtTime(Math.max(vel,0.001),t+0.004);
+  s.connect(f); f.connect(g); g.connect(dest||dry);
+  var sg=AC.createGain(); sg.gain.setValueAtTime(vel*(send||0.3),t);
+  g.connect(sg); sg.connect(verbSend);
+  s.start(t);
+}
+
+/* ── 鐘の音（オルゴール／チェレスタ風）── やわらかい主旋律用 ── */
+function bell(freq,t,vel,dur,dest){
+  var parts=[[1.00,1.00,1.00],[2.00,0.32,0.60],[3.02,0.13,0.40],[4.16,0.055,0.26]];
+  for(var k=0;k<parts.length;k++){
+    var o=AC.createOscillator(); o.type="sine";
+    o.frequency.setValueAtTime(freq*parts[k][0]*rnd(0.997,1.003),t);
+    var g=AC.createGain();
+    var pk=Math.max(vel*parts[k][1],0.00012);
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.exponentialRampToValueAtTime(pk,t+0.022);          /* やわらかい立ち上がり */
+    g.gain.exponentialRampToValueAtTime(0.0001,t+dur*parts[k][2]);
+    o.connect(g); g.connect(dest||dry);
+    var sg=AC.createGain(); sg.gain.setValueAtTime(pk*0.75,t); /* 残響を多めに */
+    g.connect(sg); sg.connect(verbSend);
+    o.start(t); o.stop(t+dur*parts[k][2]+0.1);
+  }
+}
+
+/* ── 弦のパッド（背景をふんわり支える）── */
+function pad(freqs,t,dur,vel,dest){
+  for(var k=0;k<freqs.length;k++){
+    var o=AC.createOscillator(); o.type="triangle";
+    o.frequency.setValueAtTime(freqs[k]*rnd(0.9975,1.0025),t);
+    var f=AC.createBiquadFilter(); f.type="lowpass";
+    f.frequency.setValueAtTime(1500,t); f.Q.setValueAtTime(0.4,t);
+    var g=AC.createGain();
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.exponentialRampToValueAtTime(Math.max(vel,0.00012),t+dur*0.35);  /* ゆっくり膨らむ */
+    g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(f); f.connect(g); g.connect(dest||dry);
+    var sg=AC.createGain(); sg.gain.setValueAtTime(vel*0.9,t);
+    g.connect(sg); sg.connect(verbSend);
+    o.start(t); o.stop(t+dur+0.1);
+  }
+}
+
+/* ── 打撃音：ノイズの接触＋円盤の共振＋盤の胴鳴り ── */
+function impact(t, opt){
+  var base=opt.base, lvl=opt.lvl, click=opt.click, body=opt.body, send=opt.send;
+
+  /* ① 接触のノイズ（樹脂のふちが当たる瞬間） */
+  var ns=AC.createBufferSource(); ns.buffer=noiseBuf;
+  ns.playbackRate.setValueAtTime(rnd(0.9,1.1),t);
+  var nsAmp=AC.createGain();
+  nsAmp.gain.setValueAtTime(0.0001,t);
+  nsAmp.gain.exponentialRampToValueAtTime(click*lvl,t+0.0015);
+  nsAmp.gain.exponentialRampToValueAtTime(0.0001,t+rnd(0.020,0.034));
+  ns.connect(nsAmp);
+  var bands=[[rnd(1700,2100),3.5,1],[rnd(3000,3600),5,0.62],[rnd(5200,6200),6,0.3]];
+  for(var k=0;k<bands.length;k++){
+    var bp=AC.createBiquadFilter(); bp.type="bandpass";
+    bp.frequency.setValueAtTime(bands[k][0],t); bp.Q.setValueAtTime(bands[k][1],t);
+    var bg=AC.createGain(); bg.gain.setValueAtTime(bands[k][2],t);
+    nsAmp.connect(bp); bp.connect(bg); bg.connect(dry);
+    var bs=AC.createGain(); bs.gain.setValueAtTime(bands[k][2]*send,t);
+    bg.connect(bs); bs.connect(verbSend);
+  }
+  ns.start(t); ns.stop(t+0.06);
+
+  /* ② 円盤の共振モード（非整数倍音＝硬い板の鳴り方） */
+  var modes=[[1.00,1.00,0.105],[1.63,0.55,0.072],[2.41,0.30,0.048],[3.22,0.16,0.032]];
+  for(var m=0;m<modes.length;m++){
+    var o=AC.createOscillator(); o.type="sine";
+    o.frequency.setValueAtTime(base*modes[m][0]*rnd(0.985,1.015),t);
+    var g=AC.createGain();
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.exponentialRampToValueAtTime(Math.max(lvl*modes[m][1]*0.55,0.0002),t+0.003);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+modes[m][2]);
+    o.connect(g); g.connect(dry);
+    var sg=AC.createGain(); sg.gain.setValueAtTime(lvl*modes[m][1]*send*0.5,t);
+    g.connect(sg); sg.connect(verbSend);
+    o.start(t); o.stop(t+modes[m][2]+0.05);
+  }
+
+  /* ③ 盤の胴鳴り（下に空洞がある感じ） */
+  if(body>0){
+    var lo=AC.createOscillator(); lo.type="sine";
+    lo.frequency.setValueAtTime(rnd(96,124),t);
+    lo.frequency.exponentialRampToValueAtTime(rnd(66,80),t+0.07);
+    var lg=AC.createGain();
+    lg.gain.setValueAtTime(0.0001,t);
+    lg.gain.exponentialRampToValueAtTime(lvl*body,t+0.006);
+    lg.gain.exponentialRampToValueAtTime(0.0001,t+0.10);
+    lo.connect(lg); lg.connect(dry);
+    lo.start(t); lo.stop(t+0.13);
+  }
+}
+
+/* 石を置く */
+function sfxPlace(color){
+  if(!sfxOn || !audioReady()) return;
+  wake();
+  var t=AC.currentTime+0.005;
+  impact(t,{ base: (color===1?rnd(305,345):rnd(340,385)),
+             lvl: rnd(0.26,0.34), click:0.5, body:0.30, send:0.16 });
+}
+/* 裏返る（軽く、少し高く、指ではじく感じ） */
+function sfxFlips(n){
+  if(!sfxOn || !audioReady()) return;
+  var t0=AC.currentTime, lim=Math.min(n,8), k, acc=0.085;
+  for(k=0;k<lim;k++){
+    acc += rnd(0.048,0.078);
+    impact(t0+acc,{ base: rnd(430,540), lvl: rnd(0.10,0.16)*(1-k*0.05),
+                    click:0.34, body:0.07, send:0.22 });
+  }
+}
+/* 隅を取る：置く音＋余韻のある和音 */
+function sfxCorner(){
+  if(!sfxOn || !audioReady()) return;
+  var t=AC.currentTime+0.11, n=[261.63,392.00,523.25,783.99], k;
+  for(k=0;k<n.length;k++)
+    pluck(n[k], t+k*0.062, 0.14-k*0.018, 1.7, 0.9966, 0.5, 0.55);
+}
+/* 相手が打てずに手番が戻るとき：低く静かな合図 */
+function sfxPass(){
+  if(!sfxOn || !audioReady()) return;
+  var t=AC.currentTime+0.06;
+  bell(196.00, t,      0.075, 1.5);
+  bell(146.83, t+0.14, 0.060, 1.7);
+}
+/* 終局 */
+function sfxEnd(decisive){
+  if(!sfxOn || !audioReady()) return;
+  var t=AC.currentTime+0.12, k;
+  var n = decisive ? [220.00,329.63,440.00,659.26,880.00] : [440.00,392.00,349.23,293.66,261.63];
+  for(k=0;k<n.length;k++)
+    pluck(n[k], t+k*0.16, 0.15-k*0.012, 1.7, 0.9966, 0.5, 0.6);
+}
+
+/* ── BGM：3拍子のゆるやかなワルツ（16小節・約1分の循環）──
+   ヘ長調。オルゴール風の主旋律＋撥弦の伴奏＋弦のパッド。
+   既存楽曲は一切使わず、和声進行と旋律はこのために書き下ろした。 */
+var BPM=52, BEAT=60/BPM, BAR=BEAT*3;       /* 3拍子・1小節 約3.46秒 */
+var PROG=[
+  {bass: 87.31, ch:[349.23,440.00,523.25], pad:[174.61,261.63,329.63]}, /* Fmaj9  */
+  {bass:110.00, ch:[329.63,440.00,523.25], pad:[220.00,261.63,329.63]}, /* Am7    */
+  {bass:116.54, ch:[349.23,466.16,587.33], pad:[233.08,293.66,349.23]}, /* B♭maj7 */
+  {bass:130.81, ch:[329.63,392.00,523.25], pad:[196.00,261.63,329.63]}, /* C      */
+  {bass:146.83, ch:[349.23,440.00,587.33], pad:[220.00,293.66,349.23]}, /* Dm7    */
+  {bass:116.54, ch:[349.23,466.16,523.25], pad:[233.08,293.66,349.23]}, /* B♭maj7 */
+  {bass: 98.00, ch:[349.23,466.16,587.33], pad:[196.00,233.08,293.66]}, /* Gm7    */
+  {bass:130.81, ch:[329.63,392.00,466.16], pad:[196.00,261.63,329.63]}  /* C7     */
+];
+/* 主旋律 16小節  [拍, 周波数, 長さ(拍), 強さ]  ── 休符を多くとって歌わせる */
+var F4=349.23,G4=392.00,A4=440.00,Bb4=466.16,C5=523.25,D5=587.33,E5=659.25,
+    F5=698.46,G5=783.99,A5=880.00;
+var MEL=[
+  [[0,A4,2,1.00],[2,C5,1,0.78]],          /*  1 */
+  [[0,D5,2.6,0.92]],                       /*  2 */
+  [[0,C5,1,0.72],[1,D5,1,0.76],[2,F5,1,0.86]], /*  3 */
+  [[0,E5,2,0.94],[2,D5,1,0.72]],           /*  4 */
+  [[0,C5,2.6,0.88]],                       /*  5 */
+  [[0,Bb4,1,0.70],[1,C5,1,0.74],[2,D5,1,0.80]], /*  6 */
+  [[0,C5,2,0.86],[2,Bb4,1,0.68]],          /*  7 */
+  [[0,A4,2.8,0.82]],                       /*  8 */
+  [[0,F5,2,0.98],[2,E5,1,0.76]],           /*  9 */
+  [[0,C5,2.6,0.86]],                       /* 10 */
+  [[0,D5,1,0.74],[1,F5,1,0.80],[2,G5,1,0.90]], /* 11 */
+  [[0,A5,2,1.00],[2,G5,1,0.74]],           /* 12 */
+  [[0,F5,2,0.90],[2,E5,1,0.70]],           /* 13 */
+  [[0,D5,2.6,0.84]],                       /* 14 */
+  [[0,C5,1,0.72],[1,Bb4,1,0.70],[2,A4,1,0.74]], /* 15 */
+  [[0,G4,2.8,0.78]]                        /* 16 */
+];
+
+function scheduleBar(bar,t){
+  var P=PROG[bar%8], mel=MEL[bar%16], k;
+
+  /* パッド：小節いっぱい、ゆっくり膨らんで消える */
+  pad(P.pad, t, BAR*0.98, 0.020, bgmGain);
+
+  /* 伴奏：ワルツの「ズン・タッ・タッ」。低音は1拍目だけ */
+  pluck(P.bass, t+rnd(0,0.012), 0.155, 2.0, 0.9977, 0.30, 0.30, 1, bgmGain);
+  pluck(P.ch[0], t+BEAT+rnd(-0.014,0.018), 0.058, 1.7, 0.9966, 0.42, 0.40, 1, bgmGain);
+  pluck(P.ch[1], t+BEAT+rnd(-0.014,0.018), 0.048, 1.7, 0.9966, 0.42, 0.40, 1, bgmGain);
+  pluck(P.ch[1], t+BEAT*2+rnd(-0.016,0.020), 0.046, 1.7, 0.9966, 0.42, 0.40, 1, bgmGain);
+  pluck(P.ch[2], t+BEAT*2+rnd(-0.016,0.020), 0.040, 1.7, 0.9966, 0.42, 0.40, 1, bgmGain);
+
+  /* 主旋律：オルゴール風。長さと強さを毎回わずかに揺らす */
+  for(k=0;k<mel.length;k++){
+    var when = t + mel[k][0]*BEAT + rnd(-0.020,0.024);
+    var vel  = mel[k][3]*rnd(0.90,1.08)*0.105;
+    bell(mel[k][1], when, vel, mel[k][2]*BEAT*1.15, bgmGain);
+  }
+}
+
+function bgmTick(){
+  if(!AC) return;
+  while(bgmNext < AC.currentTime + 0.7){
+    if(bgmNext < AC.currentTime) bgmNext = AC.currentTime + 0.06;
+    scheduleBar(bgmBar, bgmNext);
+    bgmNext += BAR;
+    bgmBar++;
+  }
+}
+function bgmStart(){
+  if(!audioReady()) return false;
+  wake();
+  if(!bgmGain){ bgmGain=AC.createGain(); bgmGain.gain.value=0.0001; bgmGain.connect(dry); }
+  bgmGain.gain.cancelScheduledValues(AC.currentTime);
+  bgmGain.gain.setValueAtTime(Math.max(bgmGain.gain.value,0.0001),AC.currentTime);
+  bgmGain.gain.exponentialRampToValueAtTime(0.34,AC.currentTime+2.2);   /* ゆっくり立ち上げる */
+  bgmBar=0; bgmNext=AC.currentTime+0.2;
+  bgmTick();
+  if(bgmTimer) clearInterval(bgmTimer);
+  bgmTimer=setInterval(bgmTick,140);
+  return true;
+}
+function bgmStop(){
+  if(bgmTimer){ clearInterval(bgmTimer); bgmTimer=null; }
+  if(AC && bgmGain){
+    bgmGain.gain.cancelScheduledValues(AC.currentTime);
+    bgmGain.gain.setValueAtTime(Math.max(bgmGain.gain.value,0.0001),AC.currentTime);
+    bgmGain.gain.exponentialRampToValueAtTime(0.0001,AC.currentTime+1.4);
+  }
+}
+
+/* ═══════════ 状態 ═══════════ */
+var hist=[{board:freshBoard(),kifu:[],turn:1,passed:0}];
+var cands=[], thinking=true, timer=null;
+var mode=0, endAnnounced=false;
+var vsCPU=false, cpuLevel=1, humanColor=1, cpuBusy=false, cpuTimer=null;
+/* uiMode 0=アシストモード 1=ふたりで対局 2=EGO-GPTと対戦
+   対局モード（1・2）はアシストを一切出さない＝次の一手も、・も、〇も出さない */
+var uiMode=0, started=false, badMsg="", badTimer=null;
+function cur(){return hist[hist.length-1];}
+function coaching(turn){
+  if(uiMode!==0) return false;
+  return mode===0 || mode===turn;
+}
+function showHints(){return uiMode===0 && mode!==4;}   /* 打てる場所の印を出すか */
+
+/* ═══════════ 盤の組み立て ═══════════ */
+var gridEl=document.getElementById("grid"), cells=[], cellState=[];
+(function(){
+  for(var i=0;i<64;i++){
+    var btn=document.createElement("button");
+    btn.className="sq";
+    btn.setAttribute("data-i",String(i));
+    btn.addEventListener("click",function(){place(parseInt(this.getAttribute("data-i"),10));});
+    gridEl.appendChild(btn); cells.push(btn); cellState.push("");
+  }
+})();
+
+function reasonFor(c,all){
+  var parts=[],others=[],k,minOther;
+  if(CORNERS.indexOf(c.i)>=0) parts.push("隅を確保できる最優先の一手");
+  else if(XSQ.indexOf(c.i)>=0) parts.push("隅の斜め隣（X打ち）で危険度が高い");
+  else if(CSQ.indexOf(c.i)>=0) parts.push("辺の端から2番目（C打ち）で注意が要る");
+  for(k=0;k<all.length;k++) if(all[k].i!==c.i) others.push(all[k].oppMoves);
+  if(others.length){
+    minOther=Math.min.apply(null,others);
+    if(c.oppMoves<minOther) parts.push("相手の応手を"+c.oppMoves+"手に絞れる（他の候補より少ない）");
+    else parts.push("相手の応手は"+c.oppMoves+"手");
+  } else parts.push("他に選択肢がない一手");
+  parts.push("裏返るのは"+c.flips+"枚");
+  return parts.join("・");
+}
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");}
+
+/* ═══════════ 描画 ═══════════ */
+var EMPTY=(function(){var a=[],k;for(k=0;k<64;k++)a.push(0);return a;})();
+function render(){
+  /* スタート前は石を1つも置かない（空の盤を見せる） */
+  var s=cur(), b=(started?s.board:EMPTY), turn=s.turn, nameT=(turn===1?"黒":"白");
+  var mv=started?legal(b,turn):[], oppHas=started&&legal(b,3-turn).length>0;
+  var c=counts(b), finished=started&&!mv.length&&!oppHas, mustPass=started&&!mv.length&&oppHas;
+  var last=(started&&s.kifu.length)?s.kifu[s.kifu.length-1].i:-1;
+  var advise=coaching(turn);
+  var egoNow=(vsCPU && turn!==humanColor && !finished);
+  var best=(advise&&!thinking&&cands.length)?cands[0]:null;
+
+  document.getElementById("moveno").textContent=started?((s.kifu.length+1)+"手目"):"未開始";
+
+  var card=document.getElementById("card"),h="";
+  if(badMsg) h+='<div class="notice"><b>'+esc(badMsg)+'</b></div>';
+  if(s.passed && !finished && started){
+    h+='<div class="notice"><b>'+(s.passed===1?"黒":"白")+'は置ける場所がありません。</b><br>'+
+       'パスなので、続けて'+nameT+'が打ってください。</div>';
+  }
+  if(!started){
+    h+='<div class="eyebrow">準備</div>';
+    h+='<div class="move big">'+(uiMode===0?"アシストモード":uiMode===1?"ふたりで対局":EGO_NAME+"（"+LV_NAME[cpuLevel]+"）と対戦")+'</div>';
+    h+='<p class="why dim">'+(uiMode===0
+          ? "実際の盤で打つときの相談役です。次の一手と、その理由を出します。"
+          : uiMode===1
+          ? "ふたりで交互に打ちます。アシストも印も出しません。"
+          : "あなたは"+(humanColor===1?"黒（先手）":"白（後手）")+"。アシストも印も出しません。")+
+       '<br>［対局スタート］を押すとはじまります。</p>';
+  } else if(finished){
+    var win=(c[0]>c[1]?"黒の勝ち":c[1]>c[0]?"白の勝ち":"引き分け");
+    if(vsCPU && c[0]!==c[1])
+      win=(((c[0]>c[1])?1:2)===humanColor ? "あなたの勝ち" : EGO_NAME+"の勝ち");
+    h+='<div class="eyebrow">対局終了</div>';
+    h+='<div class="move big">'+win+'</div>';
+    h+='<p class="why dim">最終スコア 黒'+c[0]+' 対 白'+c[1]+'。</p>';
+    if(!endAnnounced){ endAnnounced=true; sfxEnd(c[0]!==c[1]); }
+  } else {
+    endAnnounced=false;
+    if(egoNow){
+      h+='<div class="eyebrow">'+EGO_NAME+'（'+LV_NAME[cpuLevel]+'）の番</div>';
+      h+='<div class="move big"><span class="turnstone '+(turn===1?"b":"w")+'"></span>考えています…</div>';
+      h+='<p class="why dim">'+(cpuLevel===1
+            ? "初級は手加減します。隅をあなたに残し、有利になるほど緩い手を選びます。"
+            : cpuLevel===2 ? "3手先まで読んでいます。"
+            : "7手先まで読みます。終盤13マスは最後まで読み切ります。")+'</p>';
+    } else if(mustPass){
+      h+='<div class="eyebrow" style="color:var(--alert)">'+nameT+'は打てる場所がありません</div>';
+      h+='<div class="move big">パス</div>';
+      h+='<div class="ctrls" style="margin-top:12px"><button class="b go" id="passbtn">パスして相手番へ</button></div>';
+    } else if(advise){
+      h+='<div class="eyebrow">次の一手（'+nameT+'）</div>';
+      h+='<div class="move">'+(thinking?"‥":(best?sqn(best.i):"—"))+
+         (!thinking&&best&&best.exact?'<span class="badge">完全読み</span>':'')+'</div>';
+      h+='<p class="why">'+(thinking?"読んでいます…":(best?esc(reasonFor(best,cands)):""))+'</p>';
+    } else if(showHints()){
+      h+='<div class="eyebrow">手番</div>';
+      h+='<div class="move big"><span class="turnstone '+(turn===1?"b":"w")+'"></span>'+nameT+'の番</div>';
+      h+='<p class="why dim">置いた場所を押してください。打てる場所には小さな印がついています。'+mv.length+'か所。</p>';
+    } else {
+      h+='<div class="eyebrow">'+(vsCPU?"あなたの番":"手番")+'</div>';
+      h+='<div class="move big"><span class="turnstone '+(turn===1?"b":"w")+'"></span>'+nameT+'の番</div>';
+      h+='<p class="why dim">置きたい場所を押してください。印は出しません。挟める場所を探してください。</p>';
+    }
+  }
+  card.innerHTML=h;
+  if(mustPass && !finished) document.getElementById("passbtn").addEventListener("click",doPass);
+
+  var live=started&&!finished&&!egoNow;
+  for(var i=0;i<64;i++){
+    var el=cells[i], v=b[i], can=(mv.indexOf(i)>=0), inner="";
+    var hint=showHints()&&!egoNow&&started;
+    /* 印を出さないモードでは、空きマスはすべて押せるようにする。
+       押せる場所だけ有効にすると、それ自体が答えになってしまうため */
+    var clickable=live&&(hint?can:v===0);
+    if(v!==0) inner='<span class="stone '+(v===1?"b":"w")+(i===last?" last":"")+'"></span>';
+    else if(best&&i===best.i) inner='<span class="ring"></span>';
+    else if(can&&hint) inner='<span class="dot '+(turn===1?"b":"w")+'"></span>';
+    el.className="sq"+(clickable?" can":"");
+    el.disabled=!clickable;
+    el.setAttribute("aria-label",sqn(i)+(v===1?" 黒":v===2?" 白":(can&&hint)?" 打てる":" 空き"));
+    if(cellState[i]!==inner){ el.innerHTML=inner; cellState[i]=inner; }
+  }
+
+  document.getElementById("cb").textContent=c[0];
+  document.getElementById("cw").textContent=c[1];
+  document.getElementById("tb").className="t"+(started&&turn===1?" on":"");
+  document.getElementById("tw").className="t"+(started&&turn===2?" on":"");
+  document.getElementById("empt").textContent="空き "+empties(b);
+
+  var box=document.getElementById("cands"), ch="";
+  if(advise&&!thinking&&cands.length>1&&!finished){
+    ch+='<div class="cands"><h2>'+nameT+'の候補手</h2>';
+    for(var k=0;k<Math.min(3,cands.length);k++){
+      var x=cands[k];
+      var sc=x.exact?((x.score>0?"+":"")+Math.round(x.score/1000)):x.score;
+      ch+='<div class="row'+(k===0?" top":"")+'"><span class="sqn">'+sqn(x.i)+'</span>'+
+          '<span class="meta">相手の応手 '+x.oppMoves+'／裏返り '+x.flips+'</span>'+
+          '<span class="sc">'+sc+'</span></div>';
+    }
+    ch+='</div>';
+  }
+  box.innerHTML=ch;
+
+  var strip=document.getElementById("strip"), kh="";
+  if(!s.kifu.length) kh='<span style="opacity:.6">まだ一手も記録がありません</span>';
+  else for(var m=0;m<s.kifu.length;m++){
+    var mo=s.kifu[m];
+    kh+='<span class="'+(m===s.kifu.length-1?"cur":"")+'">'+(m+1)+'.'+
+        (mo.p===1?"●":"○")+(mo.i<0?"pass":sqn(mo.i))+'</span>';
+  }
+  strip.innerHTML=kh;
+  strip.scrollLeft=strip.scrollWidth;
+
+  document.getElementById("undo").disabled=(!started||hist.length<=1||cpuBusy);
+  document.getElementById("start").disabled=started;
+  document.getElementById("restart").disabled=!started;
+}
+
+/* ═══════════ 思考 ═══════════ */
+function think(){
+  var s=cur(), mv=legal(s.board,s.turn);
+  if(timer) clearTimeout(timer);
+  if(!started || !mv.length || !coaching(s.turn)){
+    cands=[]; thinking=false; render();
+  } else {
+    thinking=true; cands=[]; render();
+    timer=setTimeout(function(){
+      cands=analyze(s.board,s.turn); thinking=false; render();
+    },30);
+  }
+  egoTurn();
+}
+
+/* EGO-GPT の手番なら、少し間を置いてから打たせる */
+function egoTurn(){
+  if(cpuTimer){ clearTimeout(cpuTimer); cpuTimer=null; }
+  var s=cur();
+  if(!started || !vsCPU || s.turn===humanColor || !legal(s.board,s.turn).length){
+    if(cpuBusy){ cpuBusy=false; render(); }
+    return;
+  }
+  cpuBusy=true; render();
+  cpuTimer=setTimeout(function(){
+    cpuTimer=null;
+    var st=cur();
+    if(!started || !vsCPU || st.turn===humanColor){ cpuBusy=false; render(); return; }
+    var m=egoMove(st.board,st.turn);
+    cpuBusy=false;
+    if(m>=0 && legal(st.board,st.turn).indexOf(m)>=0) commit(m);
+    else render();
+  },480);
+}
+
+function place(i){                                   /* 人間のクリック */
+  if(!started || cpuBusy) return;
+  var s=cur();
+  if(vsCPU && s.turn!==humanColor) return;
+  if(legal(s.board,s.turn).indexOf(i)<0){            /* 印を出さないモード用の手応え */
+    badMsg=sqn(i)+"には置けません。相手の石を挟める場所を選んでください。";
+    if(badTimer) clearTimeout(badTimer);
+    badTimer=setTimeout(function(){ badMsg=""; render(); },1600);
+    render();
+    return;
+  }
+  badMsg=""; if(badTimer){ clearTimeout(badTimer); badTimer=null; }
+  commit(i);
+}
+function commit(i){
+  var s=cur();
+  if(legal(s.board,s.turn).indexOf(i)<0) return;
+  var nFlips=flipsFor(s.board,i,s.turn).length;
+  var nb=applyMove(s.board,i,s.turn);
+  var nk=s.kifu.concat([{p:s.turn,i:i}]);
+  var nt=3-s.turn, passedBy=0;
+  if(!legal(nb,nt).length && legal(nb,s.turn).length){
+    nk=nk.concat([{p:nt,i:-1}]);
+    passedBy=nt;          /* 相手が打てないので手番が戻る */
+    nt=s.turn;
+  }
+  hist.push({board:nb,kifu:nk,turn:nt,passed:passedBy});
+  sfxPlace(s.turn);
+  if(nFlips) sfxFlips(nFlips);
+  if(CORNERS.indexOf(i)>=0) sfxCorner();
+  if(passedBy) sfxPass();
+  think();
+}
+function doPass(){
+  var s=cur();
+  hist.push({board:s.board,kifu:s.kifu.concat([{p:s.turn,i:-1}]),turn:3-s.turn,passed:s.turn});
+  sfxPass();
+  think();
+}
+
+/* ═══════════ 操作 ═══════════ */
+function stopEgo(){ if(cpuTimer){clearTimeout(cpuTimer);cpuTimer=null;} cpuBusy=false; }
+function newGame(begin){
+  stopEgo();
+  if(timer){ clearTimeout(timer); timer=null; }
+  if(badTimer){ clearTimeout(badTimer); badTimer=null; }
+  badMsg=""; started=!!begin; endAnnounced=false;
+  hist=[{board:freshBoard(),kifu:[],turn:1,passed:0}];
+  think();
+}
+document.getElementById("undo").addEventListener("click",function(){
+  if(!started||hist.length<=1||cpuBusy) return;
+  stopEgo();
+  hist.pop();
+  /* EGO-GPT戦では相手の応手ごと戻して、自分の手番に返す */
+  if(vsCPU) while(hist.length>1 && cur().turn!==humanColor) hist.pop();
+  endAnnounced=false; think();
+});
+document.getElementById("start").addEventListener("click",function(){ newGame(true); });
+document.getElementById("restart").addEventListener("click",function(){ newGame(true); });
+
+function segWire(id,attr,apply){
+  var list=document.getElementById(id).getElementsByTagName("button"),q;
+  for(q=0;q<list.length;q++){
+    (function(btn){
+      btn.addEventListener("click",function(){
+        for(var z=0;z<list.length;z++) list[z].className=(list[z]===btn?"on":"");
+        apply(parseInt(btn.getAttribute(attr),10));
+      });
+    })(list[q]);
+  }
+}
+/* モードを変えたら設定し直し。対局モードではアシストの選択をすべて外す */
+function setAssistButtons(on){
+  var rows=["seg1","seg2"],r,list,q;
+  for(r=0;r<rows.length;r++){
+    list=document.getElementById(rows[r]).getElementsByTagName("button");
+    for(q=0;q<list.length;q++)
+      list[q].className=(on && parseInt(list[q].getAttribute("data-m"),10)===mode)?"on":"";
+  }
+}
+segWire("segmode","data-u",function(v){
+  uiMode=v; vsCPU=(v===2);
+  if(uiMode===0){ mode=0; setAssistButtons(true); } else setAssistButtons(false);
+  document.getElementById("assistopts").style.display=(uiMode===0)?"":"none";
+  document.getElementById("cpuopts").style.display=(uiMode===2)?"":"none";
+  newGame(false);                       /* 設定を変えたらスタート前に戻す */
+});
+segWire("seglv","data-l",function(v){ cpuLevel=v; newGame(false); });
+segWire("segcol","data-c",function(v){ humanColor=v; newGame(false); });
+var segBtns=[];
+(function(){
+  var rows=["seg1","seg2"], r, list, q;
+  for(r=0;r<rows.length;r++){
+    list=document.getElementById(rows[r]).getElementsByTagName("button");
+    for(q=0;q<list.length;q++) segBtns.push(list[q]);
+  }
+  for(q=0;q<segBtns.length;q++){
+    segBtns[q].addEventListener("click",function(){
+      mode=parseInt(this.getAttribute("data-m"),10);
+      for(var z=0;z<segBtns.length;z++)
+        segBtns[z].className=(parseInt(segBtns[z].getAttribute("data-m"),10)===mode?"on":"");
+      think();
+    });
+  }
+})();
+var sfxBtn=document.getElementById("sfxbtn"), bgmBtn=document.getElementById("bgmbtn");
+sfxBtn.addEventListener("click",function(){
+  sfxOn=!sfxOn;
+  sfxBtn.className=sfxOn?"on":"";
+  sfxBtn.textContent="効果音 "+(sfxOn?"ON":"OFF");
+  if(sfxOn){ audioReady(); wake(); sfxPlace(1); }
+});
+bgmBtn.addEventListener("click",function(){
+  if(!bgmOn){
+    if(!bgmStart()){ bgmBtn.textContent="BGM 非対応"; return; }
+    bgmOn=true;
+  } else { bgmStop(); bgmOn=false; }
+  bgmBtn.className=bgmOn?"on":"";
+  bgmBtn.textContent="BGM "+(bgmOn?"ON":"OFF");
+});
+document.addEventListener("visibilitychange",function(){
+  if(document.hidden){ if(bgmTimer){clearInterval(bgmTimer);bgmTimer=null;} }
+  else if(bgmOn && AC){ wake(); bgmNext=AC.currentTime+0.2;
+    if(!bgmTimer) bgmTimer=setInterval(bgmTick,140); }
+});
+
+think();
+</script>
+</body>
+</html>
