@@ -11,7 +11,8 @@
 <style>
   :root{
     --ink:#0F1319; --panel:#161B23; --line:#232B36; --board:#33503E;
-    --grid:rgba(232,225,208,0.16); --ivory:#EFE8D8; --jet:#0A0D12;
+    --grid:rgba(232,225,208,0.16); --inner:rgba(232,225,208,0.40); --star:rgba(232,225,208,0.62);
+    --ivory:#EFE8D8; --jet:#0A0D12;
     --brass:#C9A227; --muted:#7E8899; --alert:#C2543B; --body:#B9C0CC;
     --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
     --sans:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic","Noto Sans JP",sans-serif;
@@ -70,8 +71,18 @@
   .ranks span{display:flex;align-items:center;justify-content:center;
               font-family:var(--mono);font-size:11px;color:var(--muted)}
   .grid{display:grid;grid-template-columns:repeat(8,1fr);background:var(--board);
-        border:1px solid rgba(0,0,0,.5);aspect-ratio:1/1}
-  .sq{position:relative;border:0;padding:0;background:transparent;
+        border:1px solid rgba(0,0,0,.5);aspect-ratio:1/1;position:relative}
+  /* 市販のオセロ盤と同じ内枠：中央16マスを囲む線と、その四隅の打点 */
+  .grid::before{content:"";position:absolute;left:25%;top:25%;width:50%;height:50%;
+                border:1px solid var(--inner);pointer-events:none;z-index:0}
+  .grid::after{content:"";position:absolute;left:0;top:0;right:0;bottom:0;
+               pointer-events:none;z-index:0;
+               background:
+                 radial-gradient(circle 3px at 25% 25%, var(--star) 99%, transparent 100%),
+                 radial-gradient(circle 3px at 75% 25%, var(--star) 99%, transparent 100%),
+                 radial-gradient(circle 3px at 25% 75%, var(--star) 99%, transparent 100%),
+                 radial-gradient(circle 3px at 75% 75%, var(--star) 99%, transparent 100%)}
+  .sq{position:relative;z-index:1;border:0;padding:0;background:transparent;
       box-shadow:inset -1px -1px 0 0 var(--grid);
       display:flex;align-items:center;justify-content:center}
   .sq.can{cursor:pointer}
@@ -114,6 +125,7 @@
   .strip span.cur{color:var(--brass)}
 
   .ctrls{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+  #gamectrls{margin:0 0 15px}
   button.b{background:transparent;border:1px solid var(--line);color:var(--body);
            font-family:var(--mono);font-size:11px;letter-spacing:.08em;padding:9px 13px;cursor:pointer}
   button.b:disabled{color:#4A5260;cursor:default}
@@ -128,11 +140,26 @@
     <div class="n" id="moveno"></div>
   </div>
 
-  <div class="seglabel">対戦モード</div>
-  <div class="seg" id="segvs">
-    <button data-v="0" class="on">ふたりで対局</button>
-    <button data-v="1">EGO-GPT と対戦</button>
+  <div class="seglabel">モード</div>
+  <div class="seg" id="segmode">
+    <button data-u="0" class="on">アシストモード</button>
+    <button data-u="1">ふたりで対局</button>
+    <button data-u="2">EGO-GPTと対戦</button>
   </div>
+
+  <div id="assistopts">
+    <div class="seglabel sp">アシスト</div>
+    <div class="seg" id="seg1">
+      <button data-m="0" class="on">両方にアシスト</button>
+      <button data-m="1">黒だけ</button>
+      <button data-m="2">白だけ</button>
+    </div>
+    <div class="seg last" id="seg2">
+      <button data-m="3">アシストなし</button>
+      <button data-m="4">アシスト・印なし</button>
+    </div>
+  </div>
+
   <div id="cpuopts" style="display:none">
     <div class="seglabel sp">EGO-GPT の強さ</div>
     <div class="seg" id="seglv">
@@ -141,26 +168,20 @@
       <button data-l="3">上級</button>
     </div>
     <div class="seglabel sp">あなたの石</div>
-    <div class="seg" id="segcol">
+    <div class="seg last" id="segcol">
       <button data-c="1" class="on">黒（先手）</button>
       <button data-c="2">白（後手）</button>
     </div>
   </div>
 
-  <div class="seglabel sp">アシスト</div>
-  <div class="seg" id="seg1">
-    <button data-m="0" class="on">両方にアシスト</button>
-    <button data-m="1">黒だけ</button>
-    <button data-m="2">白だけ</button>
-  </div>
-  <div class="seg last" id="seg2">
-    <button data-m="3">アシストなし</button>
-    <button data-m="4">アシスト・印なし</button>
-  </div>
-
   <div class="audio">
     <button id="sfxbtn" class="on">効果音 ON</button>
     <button id="bgmbtn">BGM OFF</button>
+  </div>
+
+  <div class="ctrls" id="gamectrls">
+    <button class="b go" id="start">対局スタート</button>
+    <button class="b" id="restart">リスタート</button>
   </div>
 
   <div class="card" id="card"></div>
@@ -189,7 +210,6 @@
 
   <div class="ctrls">
     <button class="b" id="undo">1手戻す</button>
-    <button class="b" id="rnew">最初から</button>
   </div>
 </div>
 
@@ -227,72 +247,208 @@ function evaluate(b,p){
   for(k=0;k<64;k++){if(b[k]===p)pos+=W[k];else if(b[k]===o)pos-=W[k];}
   return pos+14*(legal(b,p).length-legal(b,o).length);
 }
-function finalScore(b,p){var c=counts(b);return (p===1?c[0]-c[1]:c[1]-c[0])*1000;}
-/* 探索の持ち時間。読み切れないときは途中で打ち切る（スマホでも固まらないように） */
-var srchLimit=0, srchAbort=false, srchNodes=0;
-function srchStart(ms){ srchLimit=Date.now()+ms; srchAbort=false; srchNodes=0; }
 
-function nega(b,p,d,alpha,beta,exact){
-  if(srchAbort) return 0;
-  if(((++srchNodes)&511)===0 && Date.now()>srchLimit){ srchAbort=true; return 0; }
-  var mv=legal(b,p),best=-1e9,k,v;
-  if(!mv.length){
-    if(!legal(b,3-p).length) return finalScore(b,p);
-    return -nega(b,3-p,d,-beta,-alpha,exact);
+/* ═══════════ 探索コア ═══════════
+   時間で打ち切ると端末の速さで強さが変わってしまうので、打ち切りはやめて
+   探索そのものを速くした。読む深さは端末によらず一定。
+   ・盤は Int8Array。1手ごとに盤を複製せず、返した石を覚えて戻す（make / unmake）
+   ・8方向の並びを表にしておき、探索中は配列を一切作らない
+   ・置換表（Zobristハッシュ）で、手順違いで現れた同じ局面を読み直さない
+   ・PVS：最善手だけ広く読み、残りは「これより良くない」ことの確認に絞る    */
+
+var RAY=[];                          /* RAY[マス*8+方向] = その方向に並ぶマス */
+(function(){
+  var i,d,r,c,a;
+  for(i=0;i<64;i++) for(d=0;d<8;d++){
+    a=[]; r=(i>>3)+DIRS[d][0]; c=(i&7)+DIRS[d][1];
+    while(r>=0&&r<8&&c>=0&&c<8){ a.push(r*8+c); r+=DIRS[d][0]; c+=DIRS[d][1]; }
+    RAY[i*8+d]=new Int8Array(a);
   }
-  if(!exact&&d===0) return evaluate(b,p);
-  mv.sort(function(x,y){return W[y]-W[x];});
-  for(k=0;k<mv.length;k++){
-    v=-nega(applyMove(b,mv[k],p),3-p,d-1,-beta,-Math.max(alpha,best),exact);
-    if(v>best) best=v;
+})();
+
+var SB=new Int8Array(64);            /* 探索中の盤 */
+var FLIP=new Int8Array(64*24);       /* 返した石（深さごとに記録して戻す） */
+var FLIPN=new Int8Array(64);
+var MOVES=new Int8Array(64*34);      /* 深さごとの着手リスト */
+var ORD=new Int32Array(64*34);       /* 並べ替え用の点数 */
+
+/* Zobristハッシュ：局面を32bit×2の鍵にする */
+var ZA=new Int32Array(128), ZB=new Int32Array(128), ZTA=0,ZTB=0, ZEA=0,ZEB=0, HA=0,HB=0;
+(function(){
+  var s=123456789,k;
+  function nx(){ s^=s<<13; s^=s>>>17; s^=s<<5; return s|0; }
+  for(k=0;k<128;k++){ ZA[k]=nx(); ZB[k]=nx(); }
+  ZTA=nx(); ZTB=nx();               /* 手番の分 */
+  ZEA=nx(); ZEB=nx();               /* 完全読みと通常読みは別物として区別する */
+})();
+
+var TTBITS=18, TTSIZE=1<<TTBITS, TTMASK=TTSIZE-1;
+var ttA=new Int32Array(TTSIZE), ttB=new Int32Array(TTSIZE),
+    ttV=new Int32Array(TTSIZE), ttM=new Int32Array(TTSIZE);   /* 深さ | 種別<<6 | (手+1)<<8 */
+
+function loadSB(b){
+  var k; HA=0; HB=0;
+  for(k=0;k<64;k++){ SB[k]=b[k]; if(b[k]){ HA^=ZA[k*2+b[k]-1]; HB^=ZB[k*2+b[k]-1]; } }
+}
+function doMove(i,p,ply){
+  var base=ply*24,n=0,o=3-p,d,ray,len,k,j,cnt,q,s;
+  for(d=0;d<8;d++){
+    ray=RAY[i*8+d]; len=ray.length; cnt=0;
+    for(k=0;k<len;k++){
+      j=ray[k];
+      if(SB[j]===o){ cnt++; continue; }
+      if(SB[j]===p&&cnt){
+        for(q=0;q<cnt;q++){ s=ray[q]; SB[s]=p; FLIP[base+n++]=s;
+                            HA^=ZA[s*2]^ZA[s*2+1]; HB^=ZB[s*2]^ZB[s*2+1]; }
+      }
+      break;
+    }
+  }
+  SB[i]=p; HA^=ZA[i*2+p-1]; HB^=ZB[i*2+p-1];
+  FLIPN[ply]=n;
+}
+function undoMove(i,p,ply){
+  var base=ply*24,n=FLIPN[ply],o=3-p,k,s;
+  for(k=0;k<n;k++){ s=FLIP[base+k]; SB[s]=o; HA^=ZA[s*2]^ZA[s*2+1]; HB^=ZB[s*2]^ZB[s*2+1]; }
+  SB[i]=0; HA^=ZA[i*2+p-1]; HB^=ZB[i*2+p-1];
+}
+function genMoves(p,ply){
+  var base=ply*34,n=0,o=3-p,i,d,ray,len,k,j,cnt,ok;
+  for(i=0;i<64;i++){
+    if(SB[i]!==0) continue;
+    ok=0;
+    for(d=0;d<8;d++){
+      ray=RAY[i*8+d]; len=ray.length; cnt=0;
+      for(k=0;k<len;k++){
+        j=ray[k];
+        if(SB[j]===o){ cnt++; continue; }
+        if(SB[j]===p&&cnt) ok=1;
+        break;
+      }
+      if(ok) break;
+    }
+    if(ok) MOVES[base+n++]=i;
+  }
+  return n;
+}
+function countMoves(p){
+  var n=0,o=3-p,i,d,ray,len,k,j,cnt,ok;
+  for(i=0;i<64;i++){
+    if(SB[i]!==0) continue;
+    ok=0;
+    for(d=0;d<8;d++){
+      ray=RAY[i*8+d]; len=ray.length; cnt=0;
+      for(k=0;k<len;k++){
+        j=ray[k];
+        if(SB[j]===o){ cnt++; continue; }
+        if(SB[j]===p&&cnt) ok=1;
+        break;
+      }
+      if(ok) break;
+    }
+    if(ok) n++;
+  }
+  return n;
+}
+function evalFast(p){
+  var o=3-p,pos=0,k,v;
+  for(k=0;k<64;k++){ v=SB[k]; if(v===p) pos+=W[k]; else if(v===o) pos-=W[k]; }
+  return pos+14*(countMoves(p)-countMoves(o));
+}
+function finalFast(p){
+  var a=0,b=0,k,v;
+  for(k=0;k<64;k++){ v=SB[k]; if(v===1)a++; else if(v===2)b++; }
+  return (p===1?a-b:b-a)*1000;
+}
+
+function srch(p,d,alpha,beta,exact,ply){
+  var o=3-p, base=ply*34, n=genMoves(p,ply);
+  if(!n){                                        /* 打てない：相手も打てなければ終局 */
+    if(!countMoves(o)) return finalFast(p);
+    return -srch(o,d,-beta,-alpha,exact,ply+1);
+  }
+  if(!exact && d===0) return evalFast(p);
+
+  var ha=HA^(p===2?ZTA:0)^(exact?ZEA:0),
+      hb=HB^(p===2?ZTB:0)^(exact?ZEB:0),
+      idx=(ha>>>0)&TTMASK, m=ttM[idx], ttm=-1, td, tf, tv;
+  if(m && ttA[idx]===ha && ttB[idx]===hb){       /* 置換表に同じ局面があった */
+    td=m&63; tf=(m>>6)&3; tv=ttV[idx]; ttm=((m>>8)&127)-1;
+    if(exact || td>=d){
+      if(tf===1) return tv;                      /* 確定値 */
+      if(tf===2 && tv>=beta) return tv;          /* 下界（β以上と分かっている） */
+      if(tf===3 && tv<=alpha) return tv;         /* 上界（α以下と分かっている） */
+    }
+  }
+
+  var k,j,bi,tmp,i,v,best=-1e9,bm=-1,a=alpha;
+  for(k=0;k<n;k++) ORD[base+k]=(MOVES[base+k]===ttm ? 100000 : W[MOVES[base+k]]);
+  for(k=0;k<n;k++){
+    bi=k;                                        /* 良さそうな手から順に選び出す */
+    for(j=k+1;j<n;j++) if(ORD[base+j]>ORD[base+bi]) bi=j;
+    if(bi!==k){
+      tmp=ORD[base+k];   ORD[base+k]=ORD[base+bi];     ORD[base+bi]=tmp;
+      tmp=MOVES[base+k]; MOVES[base+k]=MOVES[base+bi]; MOVES[base+bi]=tmp;
+    }
+    i=MOVES[base+k];
+    doMove(i,p,ply);
+    if(k===0) v=-srch(o,d-1,-beta,-a,exact,ply+1);
+    else{
+      v=-srch(o,d-1,-a-1,-a,exact,ply+1);        /* まず狭い窓で確認 */
+      if(v>a && v<beta) v=-srch(o,d-1,-beta,-a,exact,ply+1);   /* 超えたら読み直す */
+    }
+    undoMove(i,p,ply);
+    if(v>best){ best=v; bm=i; if(v>a) a=v; }
     if(best>=beta) break;
   }
+
+  ttA[idx]=ha; ttB[idx]=hb; ttV[idx]=best;
+  ttM[idx]=(exact?63:d) | (((best<=alpha)?3:(best>=beta)?2:1)<<6) | ((bm+1)<<8);
   return best;
 }
-/* 全候補手に点数をつけて並べる（アシスト表示用。順位が要るので窓は絞らない） */
+
+/* 全候補手に点数をつけて並べる（アシスト表示・中級の候補選び用。窓は絞らない） */
 function rankMoves(b,p,depth,exact){
-  var mv=legal(b,p),out=[],k,nb;
+  var mv=legal(b,p),out=[],k,i,nb;
   mv.sort(function(x,y){return W[y]-W[x];});
+  loadSB(b);
   for(k=0;k<mv.length;k++){
-    nb=applyMove(b,mv[k],p);
-    out.push({i:mv[k],
-              score:-nega(nb,3-p,depth-1,-1e9,1e9,exact),
-              flips:flipsFor(b,mv[k],p).length,
-              oppMoves:legal(nb,3-p).length,
-              exact:exact});
+    i=mv[k];
+    doMove(i,p,0);
+    out.push({i:i, score:-srch(3-p,depth-1,-1e9,1e9,exact,1), exact:exact});
+    undoMove(i,p,0);
+  }
+  for(k=0;k<out.length;k++){
+    nb=applyMove(b,out[k].i,p);
+    out[k].flips=flipsFor(b,out[k].i,p).length;
+    out[k].oppMoves=legal(nb,3-p).length;
   }
   out.sort(function(x,y){return y.score-x.score;});
   return out;
 }
-/* 最善手だけを返す（コンピュータ用。根でも窓を絞るので速い）。時間切れなら -1 */
+/* 最善手だけを返す（EGO-GPT用。根でも窓を絞れるぶん速い） */
 function rootBest(b,p,depth,exact){
-  var mv=legal(b,p),k,v,best=-1e9,bi=-1,alpha=-1e9;
+  var mv=legal(b,p),k,i,v,best=-1e9,bi=-1,a=-1e9;
   if(!mv.length) return -1;
   mv.sort(function(x,y){return W[y]-W[x];});
+  loadSB(b);
   for(k=0;k<mv.length;k++){
-    v=-nega(applyMove(b,mv[k],p),3-p,depth-1,-1e9,-alpha,exact);
-    if(srchAbort) return -1;
-    if(v>best){ best=v; bi=mv[k]; alpha=v; }
+    i=mv[k];
+    doMove(i,p,0);
+    v=-srch(3-p,depth-1,-1e9,-a,exact,1);
+    undoMove(i,p,0);
+    if(v>best){ best=v; bi=i; a=v; }
   }
   return bi;
 }
-/* アシスト：持ち時間の範囲で読める深さまで反復深化する */
+/* アシスト：中盤は ASSIST_DEPTH 手読み、終盤は最後まで読み切る */
+var ASSIST_DEPTH=7, ASSIST_EXACT=12;
 function analyze(b,p){
-  var mv=legal(b,p),e,d,r,out=null;
+  var mv=legal(b,p),e;
   if(!mv.length) return [];
   e=empties(b);
-  if(e<=11){                       /* 終盤は完全読み */
-    srchStart(2500); r=rankMoves(b,p,e,true);
-    if(!srchAbort) return r;
-  }
-  srchStart(900);
-  for(d=2;d<=6;d++){
-    r=rankMoves(b,p,d,false);
-    if(srchAbort) break;
-    out=r;
-  }
-  if(!out){ srchStart(4000); out=rankMoves(b,p,1,false); }   /* 極端に遅い端末向けの保険 */
-  return out;
+  if(e<=ASSIST_EXACT) return rankMoves(b,p,e,true);
+  return rankMoves(b,p,ASSIST_DEPTH,false);
 }
 function freshBoard(){
   var b=[],k; for(k=0;k<64;k++) b.push(0);
@@ -304,8 +460,9 @@ function freshBoard(){
 /* ═══════════ EGO-GPT（コンピュータ対戦相手）═══════════
    初級：手加減する。人間に隅とモビリティを譲り、リードするほど悪手を選ぶ。
          ただし負けているときは持ち直して、一方的な展開にはしない。
-   中級：4手読み。ときどき最善を外す。
-   上級：時間の許す深さまで（最大7手）＋終盤12マスは完全読み。手加減なし。 */
+   中級：3手読み。4回に1回は最善を外す。終盤8マスから読み切り。
+   上級：7手読み＋終盤13マスは完全読み。手加減なし。
+   読む深さは固定。端末が遅くても浅くならない（時間で打ち切らない）。 */
 var EGO_NAME="EGO-GPT", LV_NAME={1:"初級",2:"中級",3:"上級"};
 
 function egoEasy(b,p){
@@ -326,28 +483,21 @@ function egoEasy(b,p){
   return bi;
 }
 
+var MID_DEPTH=3, MID_EXACT=8, HIGH_DEPTH=7, HIGH_EXACT=13;
 function egoMove(b,p){
-  var e=empties(b), d, m, r, pick=-1, mv;
+  var e=empties(b), r;
   if(cpuLevel===1) return egoEasy(b,p);
 
-  if(e <= (cpuLevel===2?8:12)){                       /* 終盤は読み切る */
-    srchStart(cpuLevel===2?1500:2600);
-    m=rootBest(b,p,e,true);
-    if(m>=0) return m;
-  }
-  if(cpuLevel===2){                                   /* 3手読み＋4回に1回は最善を外す */
-    srchStart(700); r=rankMoves(b,p,3,false);
-    if(srchAbort){ srchStart(900); r=rankMoves(b,p,2,false); }
+  if(cpuLevel===2){
+    if(e<=MID_EXACT) return rootBest(b,p,e,true);          /* 終盤は読み切る */
+    r=rankMoves(b,p,MID_DEPTH,false);
     if(!r.length) return -1;
-    if(r.length>1 && Math.random()<0.25)
+    if(r.length>1 && Math.random()<0.25)                   /* 4回に1回は最善を外す */
       return r[1+((Math.random()*Math.min(2,r.length-1))|0)].i;
     return r[0].i;
   }
-  srchStart(1100);
-  for(d=2;d<=7;d++){ m=rootBest(b,p,d,false); if(m<0) break; pick=m; }
-  if(pick<0){ srchStart(3000); pick=rootBest(b,p,2,false); }
-  if(pick<0){ mv=legal(b,p); pick=mv.length?mv[0]:-1; }
-  return pick;
+  if(e<=HIGH_EXACT) return rootBest(b,p,e,true);
+  return rootBest(b,p,HIGH_DEPTH,false);
 }
 
 /* ═══════════════════════════════════════════
@@ -697,12 +847,15 @@ var hist=[{board:freshBoard(),kifu:[],turn:1,passed:0}];
 var cands=[], thinking=true, timer=null;
 var mode=0, endAnnounced=false;
 var vsCPU=false, cpuLevel=1, humanColor=1, cpuBusy=false, cpuTimer=null;
+/* uiMode 0=アシストモード 1=ふたりで対局 2=EGO-GPTと対戦
+   対局モード（1・2）はアシストを一切出さない＝次の一手も、・も、〇も出さない */
+var uiMode=0, started=false, badMsg="", badTimer=null;
 function cur(){return hist[hist.length-1];}
 function coaching(turn){
-  if(vsCPU) return turn===humanColor && mode<3;   /* 相手の手は読んで見せない */
+  if(uiMode!==0) return false;
   return mode===0 || mode===turn;
 }
-function showHints(){return mode!==4;}   /* 打てる場所の印を出すか */
+function showHints(){return uiMode===0 && mode!==4;}   /* 打てる場所の印を出すか */
 
 /* ═══════════ 盤の組み立て ═══════════ */
 var gridEl=document.getElementById("grid"), cells=[], cellState=[];
@@ -742,14 +895,24 @@ function render(){
   var egoNow=(vsCPU && turn!==humanColor && !finished);
   var best=(advise&&!thinking&&cands.length)?cands[0]:null;
 
-  document.getElementById("moveno").textContent=(s.kifu.length+1)+"手目";
+  document.getElementById("moveno").textContent=started?((s.kifu.length+1)+"手目"):"未開始";
 
   var card=document.getElementById("card"),h="";
-  if(s.passed && !finished){
+  if(badMsg) h+='<div class="notice"><b>'+esc(badMsg)+'</b></div>';
+  if(s.passed && !finished && started){
     h+='<div class="notice"><b>'+(s.passed===1?"黒":"白")+'は置ける場所がありません。</b><br>'+
        'パスなので、続けて'+nameT+'が打ってください。</div>';
   }
-  if(finished){
+  if(!started){
+    h+='<div class="eyebrow">準備</div>';
+    h+='<div class="move big">'+(uiMode===0?"アシストモード":uiMode===1?"ふたりで対局":EGO_NAME+"（"+LV_NAME[cpuLevel]+"）と対戦")+'</div>';
+    h+='<p class="why dim">'+(uiMode===0
+          ? "実際の盤で打つときの相談役です。次の一手と、その理由を出します。"
+          : uiMode===1
+          ? "ふたりで交互に打ちます。アシストも印も出しません。"
+          : "あなたは"+(humanColor===1?"黒（先手）":"白（後手）")+"。アシストも印も出しません。")+
+       '<br>［対局スタート］を押すとはじまります。</p>';
+  } else if(finished){
     var win=(c[0]>c[1]?"黒の勝ち":c[1]>c[0]?"白の勝ち":"引き分け");
     if(vsCPU && c[0]!==c[1])
       win=(((c[0]>c[1])?1:2)===humanColor ? "あなたの勝ち" : EGO_NAME+"の勝ち");
@@ -764,7 +927,8 @@ function render(){
       h+='<div class="move big"><span class="turnstone '+(turn===1?"b":"w")+'"></span>考えています…</div>';
       h+='<p class="why dim">'+(cpuLevel===1
             ? "初級は手加減します。隅をあなたに残し、有利になるほど緩い手を選びます。"
-            : cpuLevel===2 ? "4手先まで読んでいます。" : "読める深さまで読みます。終盤は完全読み。")+'</p>';
+            : cpuLevel===2 ? "3手先まで読んでいます。"
+            : "7手先まで読みます。終盤13マスは最後まで読み切ります。")+'</p>';
     } else if(mustPass){
       h+='<div class="eyebrow" style="color:var(--alert)">'+nameT+'は打てる場所がありません</div>';
       h+='<div class="move big">パス</div>';
@@ -779,22 +943,26 @@ function render(){
       h+='<div class="move big"><span class="turnstone '+(turn===1?"b":"w")+'"></span>'+nameT+'の番</div>';
       h+='<p class="why dim">置いた場所を押してください。打てる場所には小さな印がついています。'+mv.length+'か所。</p>';
     } else {
-      h+='<div class="eyebrow">手番</div>';
+      h+='<div class="eyebrow">'+(vsCPU?"あなたの番":"手番")+'</div>';
       h+='<div class="move big"><span class="turnstone '+(turn===1?"b":"w")+'"></span>'+nameT+'の番</div>';
-      h+='<p class="why dim">置いた場所を押してください。アシストも印も出しません。挟める場所を探してください。</p>';
+      h+='<p class="why dim">置きたい場所を押してください。印は出しません。挟める場所を探してください。</p>';
     }
   }
   card.innerHTML=h;
   if(mustPass && !finished) document.getElementById("passbtn").addEventListener("click",doPass);
 
+  var live=started&&!finished&&!egoNow;
   for(var i=0;i<64;i++){
     var el=cells[i], v=b[i], can=(mv.indexOf(i)>=0), inner="";
-    var hint=showHints()&&!egoNow;
+    var hint=showHints()&&!egoNow&&started;
+    /* 印を出さないモードでは、空きマスはすべて押せるようにする。
+       押せる場所だけ有効にすると、それ自体が答えになってしまうため */
+    var clickable=live&&(hint?can:v===0);
     if(v!==0) inner='<span class="stone '+(v===1?"b":"w")+(i===last?" last":"")+'"></span>';
     else if(best&&i===best.i) inner='<span class="ring"></span>';
     else if(can&&hint) inner='<span class="dot '+(turn===1?"b":"w")+'"></span>';
-    el.className="sq"+(can&&hint?" can":"");
-    el.disabled=!can||egoNow;
+    el.className="sq"+(clickable?" can":"");
+    el.disabled=!clickable;
     el.setAttribute("aria-label",sqn(i)+(v===1?" 黒":v===2?" 白":(can&&hint)?" 打てる":" 空き"));
     if(cellState[i]!==inner){ el.innerHTML=inner; cellState[i]=inner; }
   }
@@ -829,14 +997,16 @@ function render(){
   strip.innerHTML=kh;
   strip.scrollLeft=strip.scrollWidth;
 
-  document.getElementById("undo").disabled=(hist.length<=1);
+  document.getElementById("undo").disabled=(!started||hist.length<=1||cpuBusy);
+  document.getElementById("start").disabled=started;
+  document.getElementById("restart").disabled=!started;
 }
 
 /* ═══════════ 思考 ═══════════ */
 function think(){
   var s=cur(), mv=legal(s.board,s.turn);
   if(timer) clearTimeout(timer);
-  if(!mv.length || !coaching(s.turn)){
+  if(!started || !mv.length || !coaching(s.turn)){
     cands=[]; thinking=false; render();
   } else {
     thinking=true; cands=[]; render();
@@ -851,7 +1021,7 @@ function think(){
 function egoTurn(){
   if(cpuTimer){ clearTimeout(cpuTimer); cpuTimer=null; }
   var s=cur();
-  if(!vsCPU || s.turn===humanColor || !legal(s.board,s.turn).length){
+  if(!started || !vsCPU || s.turn===humanColor || !legal(s.board,s.turn).length){
     if(cpuBusy){ cpuBusy=false; render(); }
     return;
   }
@@ -859,7 +1029,7 @@ function egoTurn(){
   cpuTimer=setTimeout(function(){
     cpuTimer=null;
     var st=cur();
-    if(!vsCPU || st.turn===humanColor){ cpuBusy=false; render(); return; }
+    if(!started || !vsCPU || st.turn===humanColor){ cpuBusy=false; render(); return; }
     var m=egoMove(st.board,st.turn);
     cpuBusy=false;
     if(m>=0 && legal(st.board,st.turn).indexOf(m)>=0) commit(m);
@@ -868,8 +1038,17 @@ function egoTurn(){
 }
 
 function place(i){                                   /* 人間のクリック */
-  if(cpuBusy) return;
-  if(vsCPU && cur().turn!==humanColor) return;
+  if(!started || cpuBusy) return;
+  var s=cur();
+  if(vsCPU && s.turn!==humanColor) return;
+  if(legal(s.board,s.turn).indexOf(i)<0){            /* 印を出さないモード用の手応え */
+    badMsg=sqn(i)+"には置けません。相手の石を挟める場所を選んでください。";
+    if(badTimer) clearTimeout(badTimer);
+    badTimer=setTimeout(function(){ badMsg=""; render(); },1600);
+    render();
+    return;
+  }
+  badMsg=""; if(badTimer){ clearTimeout(badTimer); badTimer=null; }
   commit(i);
 }
 function commit(i){
@@ -900,18 +1079,25 @@ function doPass(){
 
 /* ═══════════ 操作 ═══════════ */
 function stopEgo(){ if(cpuTimer){clearTimeout(cpuTimer);cpuTimer=null;} cpuBusy=false; }
+function newGame(begin){
+  stopEgo();
+  if(timer){ clearTimeout(timer); timer=null; }
+  if(badTimer){ clearTimeout(badTimer); badTimer=null; }
+  badMsg=""; started=!!begin; endAnnounced=false;
+  hist=[{board:freshBoard(),kifu:[],turn:1,passed:0}];
+  think();
+}
 document.getElementById("undo").addEventListener("click",function(){
-  if(hist.length<=1) return;
+  if(!started||hist.length<=1||cpuBusy) return;
   stopEgo();
   hist.pop();
   /* EGO-GPT戦では相手の応手ごと戻して、自分の手番に返す */
   if(vsCPU) while(hist.length>1 && cur().turn!==humanColor) hist.pop();
   endAnnounced=false; think();
 });
-document.getElementById("rnew").addEventListener("click",function(){
-  stopEgo();
-  hist=[{board:freshBoard(),kifu:[],turn:1,passed:0}]; endAnnounced=false; think();
-});
+document.getElementById("start").addEventListener("click",function(){ newGame(true); });
+document.getElementById("restart").addEventListener("click",function(){ newGame(true); });
+
 function segWire(id,attr,apply){
   var list=document.getElementById(id).getElementsByTagName("button"),q;
   for(q=0;q<list.length;q++){
@@ -923,13 +1109,24 @@ function segWire(id,attr,apply){
     })(list[q]);
   }
 }
-segWire("segvs","data-v",function(v){
-  vsCPU=(v===1);
-  document.getElementById("cpuopts").style.display=vsCPU?"":"none";
-  stopEgo(); think();
+/* モードを変えたら設定し直し。対局モードではアシストの選択をすべて外す */
+function setAssistButtons(on){
+  var rows=["seg1","seg2"],r,list,q;
+  for(r=0;r<rows.length;r++){
+    list=document.getElementById(rows[r]).getElementsByTagName("button");
+    for(q=0;q<list.length;q++)
+      list[q].className=(on && parseInt(list[q].getAttribute("data-m"),10)===mode)?"on":"";
+  }
+}
+segWire("segmode","data-u",function(v){
+  uiMode=v; vsCPU=(v===2);
+  if(uiMode===0){ mode=0; setAssistButtons(true); } else setAssistButtons(false);
+  document.getElementById("assistopts").style.display=(uiMode===0)?"":"none";
+  document.getElementById("cpuopts").style.display=(uiMode===2)?"":"none";
+  newGame(false);                       /* 設定を変えたらスタート前に戻す */
 });
-segWire("seglv","data-l",function(v){ cpuLevel=v; stopEgo(); think(); });
-segWire("segcol","data-c",function(v){ humanColor=v; stopEgo(); think(); });
+segWire("seglv","data-l",function(v){ cpuLevel=v; newGame(false); });
+segWire("segcol","data-c",function(v){ humanColor=v; newGame(false); });
 var segBtns=[];
 (function(){
   var rows=["seg1","seg2"], r, list, q;
