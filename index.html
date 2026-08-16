@@ -29,6 +29,8 @@
 
   .seg{display:flex;border:1px solid var(--line);margin-bottom:6px}
   .seg.last{margin-bottom:8px}
+  .seglabel{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--muted);margin:0 0 5px}
+  .seglabel.sp{margin-top:13px}
   .seg button{flex:1;background:transparent;border:0;border-right:1px solid var(--line);
               color:var(--muted);font-family:var(--mono);font-size:11px;letter-spacing:.08em;
               padding:10px 4px;cursor:pointer}
@@ -126,6 +128,26 @@
     <div class="n" id="moveno"></div>
   </div>
 
+  <div class="seglabel">対戦モード</div>
+  <div class="seg" id="segvs">
+    <button data-v="0" class="on">ふたりで対局</button>
+    <button data-v="1">EGO-GPT と対戦</button>
+  </div>
+  <div id="cpuopts" style="display:none">
+    <div class="seglabel sp">EGO-GPT の強さ</div>
+    <div class="seg" id="seglv">
+      <button data-l="1" class="on">初級</button>
+      <button data-l="2">中級</button>
+      <button data-l="3">上級</button>
+    </div>
+    <div class="seglabel sp">あなたの石</div>
+    <div class="seg" id="segcol">
+      <button data-c="1" class="on">黒（先手）</button>
+      <button data-c="2">白（後手）</button>
+    </div>
+  </div>
+
+  <div class="seglabel sp">アシスト</div>
   <div class="seg" id="seg1">
     <button data-m="0" class="on">両方にアシスト</button>
     <button data-m="1">黒だけ</button>
@@ -206,7 +228,13 @@ function evaluate(b,p){
   return pos+14*(legal(b,p).length-legal(b,o).length);
 }
 function finalScore(b,p){var c=counts(b);return (p===1?c[0]-c[1]:c[1]-c[0])*1000;}
+/* 探索の持ち時間。読み切れないときは途中で打ち切る（スマホでも固まらないように） */
+var srchLimit=0, srchAbort=false, srchNodes=0;
+function srchStart(ms){ srchLimit=Date.now()+ms; srchAbort=false; srchNodes=0; }
+
 function nega(b,p,d,alpha,beta,exact){
+  if(srchAbort) return 0;
+  if(((++srchNodes)&511)===0 && Date.now()>srchLimit){ srchAbort=true; return 0; }
   var mv=legal(b,p),best=-1e9,k,v;
   if(!mv.length){
     if(!legal(b,3-p).length) return finalScore(b,p);
@@ -221,10 +249,10 @@ function nega(b,p,d,alpha,beta,exact){
   }
   return best;
 }
-function analyze(b,p){
-  var mv=legal(b,p);
-  if(!mv.length) return [];
-  var e=empties(b), exact=e<=11, depth=exact?e:6, out=[],k,nb;
+/* 全候補手に点数をつけて並べる（アシスト表示用。順位が要るので窓は絞らない） */
+function rankMoves(b,p,depth,exact){
+  var mv=legal(b,p),out=[],k,nb;
+  mv.sort(function(x,y){return W[y]-W[x];});
   for(k=0;k<mv.length;k++){
     nb=applyMove(b,mv[k],p);
     out.push({i:mv[k],
@@ -236,11 +264,90 @@ function analyze(b,p){
   out.sort(function(x,y){return y.score-x.score;});
   return out;
 }
+/* 最善手だけを返す（コンピュータ用。根でも窓を絞るので速い）。時間切れなら -1 */
+function rootBest(b,p,depth,exact){
+  var mv=legal(b,p),k,v,best=-1e9,bi=-1,alpha=-1e9;
+  if(!mv.length) return -1;
+  mv.sort(function(x,y){return W[y]-W[x];});
+  for(k=0;k<mv.length;k++){
+    v=-nega(applyMove(b,mv[k],p),3-p,depth-1,-1e9,-alpha,exact);
+    if(srchAbort) return -1;
+    if(v>best){ best=v; bi=mv[k]; alpha=v; }
+  }
+  return bi;
+}
+/* アシスト：持ち時間の範囲で読める深さまで反復深化する */
+function analyze(b,p){
+  var mv=legal(b,p),e,d,r,out=null;
+  if(!mv.length) return [];
+  e=empties(b);
+  if(e<=11){                       /* 終盤は完全読み */
+    srchStart(2500); r=rankMoves(b,p,e,true);
+    if(!srchAbort) return r;
+  }
+  srchStart(900);
+  for(d=2;d<=6;d++){
+    r=rankMoves(b,p,d,false);
+    if(srchAbort) break;
+    out=r;
+  }
+  if(!out){ srchStart(4000); out=rankMoves(b,p,1,false); }   /* 極端に遅い端末向けの保険 */
+  return out;
+}
 function freshBoard(){
   var b=[],k; for(k=0;k<64;k++) b.push(0);
   b[27]=2; b[28]=1;   /* D4=白  E4=黒 */
   b[35]=1; b[36]=2;   /* D5=黒  E5=白 */
   return b;
+}
+
+/* ═══════════ EGO-GPT（コンピュータ対戦相手）═══════════
+   初級：手加減する。人間に隅とモビリティを譲り、リードするほど悪手を選ぶ。
+         ただし負けているときは持ち直して、一方的な展開にはしない。
+   中級：4手読み。ときどき最善を外す。
+   上級：時間の許す深さまで（最大7手）＋終盤12マスは完全読み。手加減なし。 */
+var EGO_NAME="EGO-GPT", LV_NAME={1:"初級",2:"中級",3:"上級"};
+
+function egoEasy(b,p){
+  var mv=legal(b,p), c=counts(b), lead=(p===1?c[0]-c[1]:c[1]-c[0]);
+  var t=0.5+lead*0.02;                      /* 手加減の強さ：リードするほど強く手を抜く */
+  if(t>1) t=1; if(t<0.2) t=0.2;
+  var bias=1-2*t;                           /* +なら良い手、−なら悪い手を選ぶ向き */
+  var bi=mv[0], bs=-1e9, k, nb, s;
+  for(k=0;k<mv.length;k++){
+    nb=applyMove(b,mv[k],p);
+    s = bias*evaluate(nb,p)*0.6 + rnd(0,26);
+    if(CORNERS.indexOf(mv[k])>=0) s -= 110*t;              /* 隅は人間に残す */
+    if(XSQ.indexOf(mv[k])>=0)     s +=  55*t;              /* 自分から危険地帯へ飛び込む */
+    if(CSQ.indexOf(mv[k])>=0)     s +=  26*t;
+    s += flipsFor(b,mv[k],p).length*3*t;                   /* 目先の枚数に飛びつく初心者らしさ */
+    if(s>bs){ bs=s; bi=mv[k]; }
+  }
+  return bi;
+}
+
+function egoMove(b,p){
+  var e=empties(b), d, m, r, pick=-1, mv;
+  if(cpuLevel===1) return egoEasy(b,p);
+
+  if(e <= (cpuLevel===2?8:12)){                       /* 終盤は読み切る */
+    srchStart(cpuLevel===2?1500:2600);
+    m=rootBest(b,p,e,true);
+    if(m>=0) return m;
+  }
+  if(cpuLevel===2){                                   /* 3手読み＋4回に1回は最善を外す */
+    srchStart(700); r=rankMoves(b,p,3,false);
+    if(srchAbort){ srchStart(900); r=rankMoves(b,p,2,false); }
+    if(!r.length) return -1;
+    if(r.length>1 && Math.random()<0.25)
+      return r[1+((Math.random()*Math.min(2,r.length-1))|0)].i;
+    return r[0].i;
+  }
+  srchStart(1100);
+  for(d=2;d<=7;d++){ m=rootBest(b,p,d,false); if(m<0) break; pick=m; }
+  if(pick<0){ srchStart(3000); pick=rootBest(b,p,2,false); }
+  if(pick<0){ mv=legal(b,p); pick=mv.length?mv[0]:-1; }
+  return pick;
 }
 
 /* ═══════════════════════════════════════════
@@ -589,8 +696,12 @@ function bgmStop(){
 var hist=[{board:freshBoard(),kifu:[],turn:1,passed:0}];
 var cands=[], thinking=true, timer=null;
 var mode=0, endAnnounced=false;
+var vsCPU=false, cpuLevel=1, humanColor=1, cpuBusy=false, cpuTimer=null;
 function cur(){return hist[hist.length-1];}
-function coaching(turn){return mode===0 || mode===turn;}
+function coaching(turn){
+  if(vsCPU) return turn===humanColor && mode<3;   /* 相手の手は読んで見せない */
+  return mode===0 || mode===turn;
+}
 function showHints(){return mode!==4;}   /* 打てる場所の印を出すか */
 
 /* ═══════════ 盤の組み立て ═══════════ */
@@ -628,6 +739,7 @@ function render(){
   var c=counts(b), finished=(!mv.length&&!oppHas), mustPass=(!mv.length&&oppHas);
   var last=s.kifu.length?s.kifu[s.kifu.length-1].i:-1;
   var advise=coaching(turn);
+  var egoNow=(vsCPU && turn!==humanColor && !finished);
   var best=(advise&&!thinking&&cands.length)?cands[0]:null;
 
   document.getElementById("moveno").textContent=(s.kifu.length+1)+"手目";
@@ -638,13 +750,22 @@ function render(){
        'パスなので、続けて'+nameT+'が打ってください。</div>';
   }
   if(finished){
+    var win=(c[0]>c[1]?"黒の勝ち":c[1]>c[0]?"白の勝ち":"引き分け");
+    if(vsCPU && c[0]!==c[1])
+      win=(((c[0]>c[1])?1:2)===humanColor ? "あなたの勝ち" : EGO_NAME+"の勝ち");
     h+='<div class="eyebrow">対局終了</div>';
-    h+='<div class="move big">'+(c[0]>c[1]?"黒の勝ち":c[1]>c[0]?"白の勝ち":"引き分け")+'</div>';
+    h+='<div class="move big">'+win+'</div>';
     h+='<p class="why dim">最終スコア 黒'+c[0]+' 対 白'+c[1]+'。</p>';
     if(!endAnnounced){ endAnnounced=true; sfxEnd(c[0]!==c[1]); }
   } else {
     endAnnounced=false;
-    if(mustPass){
+    if(egoNow){
+      h+='<div class="eyebrow">'+EGO_NAME+'（'+LV_NAME[cpuLevel]+'）の番</div>';
+      h+='<div class="move big"><span class="turnstone '+(turn===1?"b":"w")+'"></span>考えています…</div>';
+      h+='<p class="why dim">'+(cpuLevel===1
+            ? "初級は手加減します。隅をあなたに残し、有利になるほど緩い手を選びます。"
+            : cpuLevel===2 ? "4手先まで読んでいます。" : "読める深さまで読みます。終盤は完全読み。")+'</p>';
+    } else if(mustPass){
       h+='<div class="eyebrow" style="color:var(--alert)">'+nameT+'は打てる場所がありません</div>';
       h+='<div class="move big">パス</div>';
       h+='<div class="ctrls" style="margin-top:12px"><button class="b go" id="passbtn">パスして相手番へ</button></div>';
@@ -668,12 +789,12 @@ function render(){
 
   for(var i=0;i<64;i++){
     var el=cells[i], v=b[i], can=(mv.indexOf(i)>=0), inner="";
-    var hint=showHints();
+    var hint=showHints()&&!egoNow;
     if(v!==0) inner='<span class="stone '+(v===1?"b":"w")+(i===last?" last":"")+'"></span>';
     else if(best&&i===best.i) inner='<span class="ring"></span>';
     else if(can&&hint) inner='<span class="dot '+(turn===1?"b":"w")+'"></span>';
     el.className="sq"+(can&&hint?" can":"");
-    el.disabled=!can;
+    el.disabled=!can||egoNow;
     el.setAttribute("aria-label",sqn(i)+(v===1?" 黒":v===2?" 白":(can&&hint)?" 打てる":" 空き"));
     if(cellState[i]!==inner){ el.innerHTML=inner; cellState[i]=inner; }
   }
@@ -714,15 +835,44 @@ function render(){
 /* ═══════════ 思考 ═══════════ */
 function think(){
   var s=cur(), mv=legal(s.board,s.turn);
-  if(!mv.length || !coaching(s.turn)){cands=[];thinking=false;render();return;}
-  thinking=true; cands=[]; render();
   if(timer) clearTimeout(timer);
-  timer=setTimeout(function(){
-    cands=analyze(s.board,s.turn); thinking=false; render();
-  },30);
+  if(!mv.length || !coaching(s.turn)){
+    cands=[]; thinking=false; render();
+  } else {
+    thinking=true; cands=[]; render();
+    timer=setTimeout(function(){
+      cands=analyze(s.board,s.turn); thinking=false; render();
+    },30);
+  }
+  egoTurn();
 }
 
-function place(i){
+/* EGO-GPT の手番なら、少し間を置いてから打たせる */
+function egoTurn(){
+  if(cpuTimer){ clearTimeout(cpuTimer); cpuTimer=null; }
+  var s=cur();
+  if(!vsCPU || s.turn===humanColor || !legal(s.board,s.turn).length){
+    if(cpuBusy){ cpuBusy=false; render(); }
+    return;
+  }
+  cpuBusy=true; render();
+  cpuTimer=setTimeout(function(){
+    cpuTimer=null;
+    var st=cur();
+    if(!vsCPU || st.turn===humanColor){ cpuBusy=false; render(); return; }
+    var m=egoMove(st.board,st.turn);
+    cpuBusy=false;
+    if(m>=0 && legal(st.board,st.turn).indexOf(m)>=0) commit(m);
+    else render();
+  },480);
+}
+
+function place(i){                                   /* 人間のクリック */
+  if(cpuBusy) return;
+  if(vsCPU && cur().turn!==humanColor) return;
+  commit(i);
+}
+function commit(i){
   var s=cur();
   if(legal(s.board,s.turn).indexOf(i)<0) return;
   var nFlips=flipsFor(s.board,i,s.turn).length;
@@ -749,12 +899,37 @@ function doPass(){
 }
 
 /* ═══════════ 操作 ═══════════ */
+function stopEgo(){ if(cpuTimer){clearTimeout(cpuTimer);cpuTimer=null;} cpuBusy=false; }
 document.getElementById("undo").addEventListener("click",function(){
-  if(hist.length>1){hist.pop(); endAnnounced=false; think();}
+  if(hist.length<=1) return;
+  stopEgo();
+  hist.pop();
+  /* EGO-GPT戦では相手の応手ごと戻して、自分の手番に返す */
+  if(vsCPU) while(hist.length>1 && cur().turn!==humanColor) hist.pop();
+  endAnnounced=false; think();
 });
 document.getElementById("rnew").addEventListener("click",function(){
+  stopEgo();
   hist=[{board:freshBoard(),kifu:[],turn:1,passed:0}]; endAnnounced=false; think();
 });
+function segWire(id,attr,apply){
+  var list=document.getElementById(id).getElementsByTagName("button"),q;
+  for(q=0;q<list.length;q++){
+    (function(btn){
+      btn.addEventListener("click",function(){
+        for(var z=0;z<list.length;z++) list[z].className=(list[z]===btn?"on":"");
+        apply(parseInt(btn.getAttribute(attr),10));
+      });
+    })(list[q]);
+  }
+}
+segWire("segvs","data-v",function(v){
+  vsCPU=(v===1);
+  document.getElementById("cpuopts").style.display=vsCPU?"":"none";
+  stopEgo(); think();
+});
+segWire("seglv","data-l",function(v){ cpuLevel=v; stopEgo(); think(); });
+segWire("segcol","data-c",function(v){ humanColor=v; stopEgo(); think(); });
 var segBtns=[];
 (function(){
   var rows=["seg1","seg2"], r, list, q;
