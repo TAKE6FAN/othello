@@ -19,18 +19,21 @@
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;background:var(--ink)}
-  /* ページ自体はスクロールさせない。盤は必ず画面内に置き、あふれる操作だけを .side で送る */
+  /* ページ自体はスクロールさせない。盤は必ず画面内に置き、あふれる操作だけを .side で送る。
+     縦横の切り替えと盤の大きさは CSS の vh 任せにせず、JS が実寸を測って決める（fitBoard）。
+     ブラウザのツールバーぶんの高さや拡大率は vh では拾えず、盤とパネルが重なるため。 */
   body{color:var(--ivory);font-family:var(--sans);
        padding:calc(10px + env(safe-area-inset-top)) 14px calc(10px + env(safe-area-inset-bottom));
        -webkit-text-size-adjust:100%;
-       height:100vh; height:100svh; overflow:hidden}
-  .wrap{max-width:440px;margin:0 auto;height:100%;
-        display:grid;grid-template-rows:auto auto minmax(0,1fr);row-gap:10px}
-  .stage{min-width:0}
-  .side{min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
+       height:var(--appH,100vh);overflow:hidden}
+  .wrap{max-width:440px;margin:0 auto;height:100%;min-height:0;
+        display:flex;flex-direction:column;gap:10px}
+  .stage{flex:0 0 auto;min-width:0;overflow:hidden}
+  .side{flex:1 1 auto;min-height:0;min-width:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
         overscroll-behavior:contain;padding-bottom:6px}
-  /* 盤の大きさは「幅」と「画面の高さ」の小さいほうで決める＝どちらの向きでも全体が見える */
-  .boardbox{width:min(100%, calc(56vh - 58px));width:min(100%, calc(56svh - 58px));margin:0 auto}
+  .boardbox{margin:0 auto}
+  /* 横向き：左に盤・右に操作。どちらの幅も JS が px で入れる */
+  .wrap.land{max-width:none;flex-direction:row;align-items:stretch;gap:14px}
 
   .head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
   .head .id{font-family:var(--mono);font-size:11px;letter-spacing:.22em;color:var(--muted)}
@@ -167,34 +170,18 @@
   button.b.go{border-color:var(--brass);color:var(--brass);font-size:12px;letter-spacing:.1em;padding:9px 16px}
   button.b:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 
-  /* ── 横向き（スマホを寝かせたとき）──
-     縦の余裕が無いので、盤は画面の高さいっぱいに収めて左へ、操作は右へ回す。
-     こうしないと正方形の盤が画面高を超えて、全体が見えなくなる。 */
-  @media (orientation:landscape) and (max-height:620px){
-    .wrap{max-width:none;column-gap:16px;row-gap:6px;
-          grid-template-columns:min(calc(100vh - 72px), 48vw) minmax(230px,1fr);
-          grid-template-columns:min(calc(100svh - 72px), 48vw) minmax(230px,1fr);
-          grid-template-rows:auto minmax(0,1fr)}
-    .boardbox{width:100%}
-    .stage{grid-column:1;grid-row:1 / span 2;align-self:start}
-    .head{grid-column:2;grid-row:1;margin-bottom:2px}
-    .side{grid-column:2;grid-row:2}
-    .tally{margin:10px 0 0}
-    .card{padding:12px 14px 14px;margin-bottom:12px}
-    .move{font-size:36px}
-    .move.big{font-size:28px}
-  }
+  /* 横向きは字を少し詰める（縦の余裕がないため） */
+  .wrap.land .card{padding:12px 14px 14px;margin-bottom:12px}
+  .wrap.land .move{font-size:34px}
+  .wrap.land .move.big{font-size:26px}
+  .wrap.land .tally{margin:8px 0 0}
+  .wrap.land .head{margin-bottom:6px}
 </style>
 </head>
 <body>
 <div class="wrap">
 
-  <div class="head">
-    <div class="id">OTHELLO / 対局アシスタント</div>
-    <div class="n" id="moveno"></div>
-  </div>
-
-  <!-- 盤。縦でも横でも必ず画面に収まるように、ここだけは大きさを画面から決める -->
+  <!-- 盤。縦でも横でも必ず画面に収まるように、大きさは JS が実寸から決める（fitBoard） -->
   <div class="stage">
     <div class="boardbox">
       <div class="layout">
@@ -213,6 +200,11 @@
 
   <!-- 盤以外はここに入れて、はみ出す分はこの中だけをスクロールさせる -->
   <div class="side">
+    <div class="head">
+      <div class="id">OTHELLO / 対局アシスタント</div>
+      <div class="n" id="moveno"></div>
+    </div>
+
     <div class="card" id="card"></div>
 
     <div class="ctrls" id="gamectrls">
@@ -966,9 +958,10 @@ function render(){
 
   var card=document.getElementById("card"),h="";
   if(badMsg) h+='<div class="notice"><b>'+esc(badMsg)+'</b></div>';
+  var whoName=function(color){ return vsCPU ? (color===humanColor?"あなた":EGO_NAME) : (color===1?"黒":"白"); };
   if(s.passed && !finished && started){
-    h+='<div class="notice"><b>'+(s.passed===1?"黒":"白")+'は置ける場所がありません。</b><br>'+
-       'パスなので、続けて'+nameT+'が打ってください。</div>';
+    h+='<div class="notice"><b>'+whoName(s.passed)+'は置ける場所がありませんでした。</b><br>'+
+       'パスなので、続けて'+whoName(turn)+'が打ちます。</div>';
   }
   if(!started){
     h+='<div class="eyebrow">準備</div>';
@@ -989,17 +982,18 @@ function render(){
     if(!endAnnounced){ endAnnounced=true; sfxEnd(c[0]!==c[1]); }
   } else {
     endAnnounced=false;
-    if(egoNow){
+    if(mustPass){
+      h+='<div class="eyebrow" style="color:var(--alert)">'+whoName(turn)+'は打てる場所がありません</div>';
+      h+='<div class="move big">パス</div>';
+      h+='<p class="why">'+whoName(3-turn)+'が続けて打ちます。そのままお待ちください。</p>';
+      h+='<div class="ctrls" style="margin-top:12px"><button class="b go" id="passbtn">すぐパスする</button></div>';
+    } else if(egoNow){
       h+='<div class="eyebrow">'+EGO_NAME+'（'+LV_NAME[cpuLevel]+'）の番</div>';
       h+='<div class="move big"><span class="turnstone '+(turn===1?"b":"w")+'"></span>考えています…</div>';
       h+='<p class="why dim">'+(cpuLevel===1
             ? "初級は手加減します。隅をあなたに残し、有利になるほど緩い手を選びます。"
             : cpuLevel===2 ? "2手先まで読み、ときどき最善を外します。"
             : "7手先まで読みます。終盤13マスは最後まで読み切ります。")+'</p>';
-    } else if(mustPass){
-      h+='<div class="eyebrow" style="color:var(--alert)">'+nameT+'は打てる場所がありません</div>';
-      h+='<div class="move big">パス</div>';
-      h+='<div class="ctrls" style="margin-top:12px"><button class="b go" id="passbtn">パスして相手番へ</button></div>';
     } else if(advise){
       h+='<div class="eyebrow">次の一手（'+nameT+'）</div>';
       h+='<div class="move">'+(thinking?"‥":(best?sqn(best.i):"—"))+
@@ -1084,6 +1078,7 @@ function think(){
     },30);
   }
   egoTurn();
+  passWatch();
 }
 
 /* EGO-GPT の手番なら、少し間を置いてから打たせる */
@@ -1101,10 +1096,12 @@ function egoTurn(){
     cpuTimer=null;
     var st=cur();
     if(!started || !vsCPU || st.turn===humanColor){ cpuBusy=false; render(); return; }
-    var m=egoMove(st.board,st.turn);
+    var m=-1, mv=legal(st.board,st.turn);
+    try{ m=egoMove(st.board,st.turn); }catch(e){ m=-1; }
     cpuBusy=false;
-    if(m>=0 && legal(st.board,st.turn).indexOf(m)>=0) commit(m);
-    else render();
+    if(m>=0 && mv.indexOf(m)>=0) commit(m);
+    else if(mv.length) commit(mv[(Math.random()*mv.length)|0]);   /* 万一の失敗でも必ず打つ */
+    else { render(); passWatch(); }
   },wait);
 }
 
@@ -1136,10 +1133,12 @@ function commit(i){
   }
   hist.push({board:nb,kifu:nk,turn:nt,passed:passedBy});
   var step=startAnim(i,f,s.turn);        /* 返る石をゆっくり見せる */
-  sfxPlace(s.turn);
-  if(nFlips) sfxFlips(nFlips,step/1000);
-  if(CORNERS.indexOf(i)>=0) sfxCorner();
-  if(passedBy) sfxPass();
+  try{                                   /* 音が鳴らせなくても対局は進める */
+    sfxPlace(s.turn);
+    if(nFlips) sfxFlips(nFlips,step/1000);
+    if(CORNERS.indexOf(i)>=0) sfxCorner();
+    if(passedBy) sfxPass();
+  }catch(e){}
   think();
 }
 
@@ -1168,13 +1167,29 @@ function ringDist(a,b){
 }
 function doPass(){
   var s=cur();
+  if(legal(s.board,s.turn).length) return;              /* 打てるならパスさせない */
+  if(!legal(s.board,3-s.turn).length){ render(); return; }   /* 両者打てない＝終局 */
   hist.push({board:s.board,kifu:s.kifu.concat([{p:s.turn,i:-1}]),turn:3-s.turn,passed:s.turn});
-  sfxPass();
+  try{ sfxPass(); }catch(e){}
   think();
 }
 
+/* ── 止まらないための保険 ──
+   打てる場所が無い側が手番になったら、知らせたうえで自動でパスする。
+   どんな経路でこの状態に入っても、ここで必ず先へ進む。 */
+var passTimer=null;
+function clearPassWatch(){ if(passTimer){ clearTimeout(passTimer); passTimer=null; } }
+function passWatch(){
+  clearPassWatch();
+  if(!started) return;
+  var s=cur();
+  if(legal(s.board,s.turn).length) return;              /* 打てるなら何もしない */
+  if(!legal(s.board,3-s.turn).length) return;           /* 両者打てない＝終局 */
+  passTimer=setTimeout(function(){ passTimer=null; doPass(); },1500);
+}
+
 /* ═══════════ 操作 ═══════════ */
-function stopEgo(){ if(cpuTimer){clearTimeout(cpuTimer);cpuTimer=null;} cpuBusy=false; stopAnim(); }
+function stopEgo(){ if(cpuTimer){clearTimeout(cpuTimer);cpuTimer=null;} cpuBusy=false; stopAnim(); clearPassWatch(); }
 function newGame(begin){
   stopEgo();
   if(timer){ clearTimeout(timer); timer=null; }
@@ -1254,28 +1269,54 @@ bgmBtn.addEventListener("click",function(){
   bgmBtn.className=bgmOn?"on":"";
   bgmBtn.textContent="BGM "+(bgmOn?"ON":"OFF");
 });
-/* ── 画面を回したときの立て直し ──
-   iOS（Safari / Chrome）は横向きの拡大率を縦に戻しても持ち越すことがあり、
-   そのままだと盤がはみ出して全体が見えなくなる。回すたびに
-   いったん倍率1に固定 → 少し置いてつまみ拡大を戻す、で元の大きさに復帰させる。 */
-(function(){
-  var vp=document.querySelector('meta[name=viewport]');
-  if(!vp) return;
-  var base="width=device-width, initial-scale=1, viewport-fit=cover", t=null;
-  function relayout(){
-    if(t) clearTimeout(t);
-    vp.setAttribute("content", base+", maximum-scale=1, user-scalable=no");
-    t=setTimeout(function(){
-      t=null;
-      vp.setAttribute("content", base);       /* つまみ拡大を許可し直す */
-      void document.body.offsetHeight;        /* 盤の縦横比を計算し直させる */
-      var st=document.querySelector(".stage");
-      if(st && st.scrollIntoView) st.scrollIntoView({block:"nearest"});
-    },450);
+/* ═══════════ 画面に合わせて盤の大きさを決める ═══════════
+   CSS の vh やメディアクエリでは、ブラウザのツールバーぶんの高さや
+   拡大率のズレを拾えず、盤とパネルが重なることがあった。
+   そこで「いま実際に見えている大きさ」（visualViewport）を測って、
+   縦横の切り替えと盤の一辺を px で決める。 */
+var BOX_PAD=16, RANK_COL=26, FILE_ROW=19;   /* 盤の外側にある枠・列名・行名のぶん */
+function viewSize(){
+  var vv=window.visualViewport;
+  return {w:Math.round(vv?vv.width:window.innerWidth),
+          h:Math.round(vv?vv.height:window.innerHeight)};
+}
+function fitBoard(){
+  var v=viewSize(), wrap=document.querySelector(".wrap"),
+      stage=document.querySelector(".stage"), box=document.querySelector(".boardbox");
+  if(!wrap||!box) return;
+  document.documentElement.style.setProperty("--appH", v.h+"px");
+  var padX=28, padY=20, tallyH=42, gap=10;
+  var land=(v.w > v.h*1.15), grid;
+  wrap.className="wrap"+(land?" land":"");
+  if(land){
+    /* 高さいっぱいに収める。幅も画面の半分までに抑えて操作パネルの場所を残す */
+    grid=Math.min(v.h-padY-FILE_ROW-BOX_PAD-tallyH,
+                  Math.round((v.w-padX-14)*0.55)-RANK_COL-BOX_PAD);
+  }else{
+    /* 横幅いっぱい。ただし画面の高さの55%を超えない（操作パネルの場所を残す） */
+    grid=Math.min(v.w-padX-RANK_COL-BOX_PAD, 440-RANK_COL-BOX_PAD,
+                  Math.round(v.h*0.55)-FILE_ROW-BOX_PAD-tallyH-gap);
   }
-  window.addEventListener("orientationchange",relayout);
+  if(grid<120) grid=120;                     /* これ以上は小さくしない */
+  var boxW=grid+RANK_COL+BOX_PAD;
+  box.style.width=boxW+"px";
+  stage.style.width=land?(boxW+"px"):"";
+}
+(function(){
+  var raf=null;
+  function schedule(){ if(raf) cancelAnimationFrame(raf); raf=requestAnimationFrame(function(){ raf=null; fitBoard(); }); }
+  window.addEventListener("resize",schedule);
+  if(window.visualViewport){
+    window.visualViewport.addEventListener("resize",schedule);
+    window.visualViewport.addEventListener("scroll",schedule);
+  }
+  /* 回転直後は端末が古い寸法を返すことがあるので、少し置いてから測り直す */
+  function onRotate(){ schedule(); setTimeout(fitBoard,120); setTimeout(fitBoard,400); setTimeout(fitBoard,800); }
+  window.addEventListener("orientationchange",onRotate);
   if(window.screen && screen.orientation && screen.orientation.addEventListener)
-    screen.orientation.addEventListener("change",relayout);
+    screen.orientation.addEventListener("change",onRotate);
+  window.addEventListener("pageshow",schedule);
+  fitBoard();
 })();
 
 document.addEventListener("visibilitychange",function(){
