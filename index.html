@@ -466,11 +466,13 @@ function freshBoard(){
 var EGO_NAME="EGO-GPT", LV_NAME={1:"初級",2:"中級",3:"上級"};
 
 function egoEasy(b,p){
-  var mv=legal(b,p), c=counts(b), lead=(p===1?c[0]-c[1]:c[1]-c[0]);
+  var mv=legal(b,p), c=counts(b), lead=(p===1?c[0]-c[1]:c[1]-c[0]), keep=[], k, nb, s;
+  for(k=0;k<mv.length;k++) if(CORNERS.indexOf(mv[k])<0) keep.push(mv[k]);
+  if(keep.length) mv=keep;                  /* 隅は取らずに人間に残す（他に手がある限り） */
   var t=0.5+lead*0.02;                      /* 手加減の強さ：リードするほど強く手を抜く */
-  if(t>1) t=1; if(t<0.2) t=0.2;
+  if(t>1) t=1; if(t<0.8) t=0.8;             /* 負けていても、ほとんど手加減したまま */
   var bias=1-2*t;                           /* +なら良い手、−なら悪い手を選ぶ向き */
-  var bi=mv[0], bs=-1e9, k, nb, s;
+  var bi=mv[0], bs=-1e9;
   for(k=0;k<mv.length;k++){
     nb=applyMove(b,mv[k],p);
     s = bias*evaluate(nb,p)*0.6 + rnd(0,26);
@@ -886,11 +888,13 @@ function reasonFor(c,all){
 function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");}
 
 /* ═══════════ 描画 ═══════════ */
+var EMPTY=(function(){var a=[],k;for(k=0;k<64;k++)a.push(0);return a;})();
 function render(){
-  var s=cur(), b=s.board, turn=s.turn, nameT=(turn===1?"黒":"白");
-  var mv=legal(b,turn), oppHas=legal(b,3-turn).length>0;
-  var c=counts(b), finished=(!mv.length&&!oppHas), mustPass=(!mv.length&&oppHas);
-  var last=s.kifu.length?s.kifu[s.kifu.length-1].i:-1;
+  /* スタート前は石を1つも置かない（空の盤を見せる） */
+  var s=cur(), b=(started?s.board:EMPTY), turn=s.turn, nameT=(turn===1?"黒":"白");
+  var mv=started?legal(b,turn):[], oppHas=started&&legal(b,3-turn).length>0;
+  var c=counts(b), finished=started&&!mv.length&&!oppHas, mustPass=started&&!mv.length&&oppHas;
+  var last=(started&&s.kifu.length)?s.kifu[s.kifu.length-1].i:-1;
   var advise=coaching(turn);
   var egoNow=(vsCPU && turn!==humanColor && !finished);
   var best=(advise&&!thinking&&cands.length)?cands[0]:null;
@@ -969,8 +973,8 @@ function render(){
 
   document.getElementById("cb").textContent=c[0];
   document.getElementById("cw").textContent=c[1];
-  document.getElementById("tb").className="t"+(turn===1?" on":"");
-  document.getElementById("tw").className="t"+(turn===2?" on":"");
+  document.getElementById("tb").className="t"+(started&&turn===1?" on":"");
+  document.getElementById("tw").className="t"+(started&&turn===2?" on":"");
   document.getElementById("empt").textContent="空き "+empties(b);
 
   var box=document.getElementById("cands"), ch="";
