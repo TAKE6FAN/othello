@@ -1,2 +1,4 @@
 # この機械だけの設定（許可リストなど）。版管理に入れない
-.claude/settings.local.json
+# 他の全リポジトリでも .claude/ は追跡していない（bunseki-01・PhotoMagic は明示除外）ため、
+# フォルダごと除外して作業ツリーを汚さない（2026-08-24）
+.claude/
