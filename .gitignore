@@ -1,0 +1,2 @@
+# この機械だけの設定（許可リストなど）。版管理に入れない
+.claude/settings.local.json
